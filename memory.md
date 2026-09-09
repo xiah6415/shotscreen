@@ -24,6 +24,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 - Clipboard copy, Desktop PNG export with deterministic naming, and floating preview controls including drag-out.
 - Annotation model extension point and explicitly non-functional Scroll Capture interface/model stubs.
 - `swift build` succeeds on 2026-09-09; built executable was launched and observed running.
+- Git repository initialized on branch `main`; initial commit is `6a41e5c` (`Initial native screenshot app foundation`).
 
 ## In Progress
 - Manual interactive capture validation on a desktop with Screen Recording permission.
