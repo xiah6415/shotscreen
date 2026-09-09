@@ -1,0 +1,54 @@
+# Agent Guide — 素顏 Shot
+
+## Project purpose
+Personal, native macOS screenshot tool: a durable replacement for the most-used CleanShot X workflows, not a commercial clone.
+
+## Technology stack
+Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Vision (reserved), and AVFoundation (reserved). No third-party dependencies.
+
+## Architecture and directory structure
+`Sources/SuYanShot` is divided by responsibility:
+
+- `App`: lifecycle and permissions.
+- `Capture`: selection UI and ScreenCaptureKit capture services.
+- `Storage`: clipboard and filesystem export.
+- `UI`: menu bar and floating thumbnail UI.
+- `Shortcuts`: Carbon-based global hotkey registration.
+- `Models`: value types shared between modules.
+- `Annotation`: model-only extension point.
+
+`Tests/SuYanShotTests` contains non-interactive unit tests. Keep UI orchestration out of capture and storage services.
+
+## Coding rules
+- Prefer current native APIs and macOS 14 availability.
+- Keep each service focused; inject callbacks/dependencies rather than making UI own storage or capture details.
+- Avoid third-party packages and premature abstractions.
+- Build after each cohesive change and add unit tests for deterministic logic.
+- Record material architecture decisions and handoff state in `memory.md`.
+- Do not modify unrelated files or implement OCR, cloud, accounts, recording, GIFs, or a full annotation editor in this phase.
+
+## Build and test
+From repository root:
+
+```sh
+swift build
+swift test
+swift run SuYanShot
+```
+
+For an app bundle / signed distribution, create an Xcode project from the package or use `xcodebuild` after a bundle target is introduced. Development runs require a graphical macOS session.
+
+## Permissions
+- **Screen Recording**: required by ScreenCaptureKit captures; prompted/opened through System Settings.
+- **Accessibility**: required for global hotkeys using Carbon event handlers. Grant in Privacy & Security if macOS requests it.
+
+## Agent handoff rules
+1. Read `memory.md` and `HANDOFF TO CLAUDE CODE.md` first.
+2. Preserve the `ScrollCaptureService` boundary; it intentionally does not stitch or control scrolling.
+3. Update `memory.md` after each completed milestone.
+4. State precisely which interactive checks were actually performed.
+
+## Modules not to change casually
+- `Capture/ScrollCapture.swift`: interface stub only until the technical spike.
+- `Models/CaptureModels.swift`: coordinates and scale contracts shared by capture services.
+- `Storage/ImageExporter.swift`: owns naming/export policy; keep that policy out of UI.
