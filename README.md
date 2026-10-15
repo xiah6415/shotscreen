@@ -37,6 +37,8 @@ Grant **Screen Recording** access when macOS asks, then relaunch the app if need
 - Full-display and shareable-window capture with ScreenCaptureKit
 - Configurable 3/5/10-second delayed capture
 - Clipboard copy, PNG export, and floating preview with Copy / Save / Annotate / drag-out
+- All-in-One (⌘⇧5): select and adjust a region, then capture it, start a scroll capture, or switch to window / full screen
+- Scroll capture: select a region, scroll down by hand, and the frames are stitched into one tall image
 - Annotation editor: arrows, boxes, ellipses, lines, pen, highlighter, text, numbered steps, pixelate, undo/redo
 - Global hotkeys for region, window, full screen, and delayed capture, customizable in 設定… (⌘,)
 

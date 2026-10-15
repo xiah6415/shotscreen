@@ -1,28 +1,68 @@
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 
-/// Reserved for the next-phase manual-scroll technical spike. This implementation intentionally does not capture, analyze, or stitch frames.
+/// Manual scroll capture: the user scrolls; this repeatedly captures a fixed region and stitches what scrolled into view.
+/// It never scrolls anything itself.
+@MainActor
 protocol ScrollCaptureService: AnyObject {
-    func start(configuration: ScrollCaptureConfiguration) throws
-    func stop() -> ScrollCaptureResult
+    func start(configuration: ScrollCaptureConfiguration, onProgress: @escaping (ScrollCaptureProgress) -> Void)
+    /// Stops capturing and returns the stitched image (nil if nothing was captured).
+    func finish() async -> CGImage?
+    func cancel()
 }
 
-struct ScrollCaptureConfiguration: Sendable {
-    let region: CGRect
+struct ScrollCaptureConfiguration {
+    let display: SCDisplay
+    /// Top-left-origin backing pixels on `display`, as used by `SCStreamConfiguration.sourceRect`.
+    let sourceRect: CGRect
+    var interval: Duration = .milliseconds(100)
 }
 
-struct ScrollCaptureFrame: Sendable {
-    let image: CGImage
-    let timestamp: Date
+struct ScrollCaptureProgress {
+    let height: Int
+    let lastResult: ScrollStitcher.FrameResult
 }
 
-enum ScrollCaptureResult: Sendable {
-    case notImplemented
-    case frames([ScrollCaptureFrame])
-    case stitched(CGImage)
-}
+@MainActor
+final class ManualScrollCaptureService: ScrollCaptureService {
+    private let captureService: ScreenCaptureService
+    private var stitcher: ScrollStitcher?
+    private var loop: Task<Void, Never>?
 
-final class PlaceholderScrollCaptureService: ScrollCaptureService {
-    func start(configuration: ScrollCaptureConfiguration) throws { }
-    func stop() -> ScrollCaptureResult { .notImplemented }
+    init(captureService: ScreenCaptureService) { self.captureService = captureService }
+
+    func start(configuration: ScrollCaptureConfiguration, onProgress: @escaping (ScrollCaptureProgress) -> Void) {
+        cancel()
+        let stitcher = ScrollStitcher()
+        self.stitcher = stitcher
+        loop = Task { @MainActor [captureService] in
+            while !Task.isCancelled {
+                let began = ContinuousClock.now
+                if let frame = try? await captureService.capture(display: configuration.display, sourceRect: configuration.sourceRect) {
+                    // Matching is CPU work; keep it off the main thread.
+                    let result = await Task.detached(priority: .userInitiated) { stitcher.add(frame) }.value
+                    onProgress(ScrollCaptureProgress(height: stitcher.height, lastResult: result))
+                    if result == .limitReached { break }
+                }
+                let remaining = configuration.interval - (ContinuousClock.now - began)
+                if remaining > .zero { try? await Task.sleep(for: remaining) }
+            }
+        }
+    }
+
+    func finish() async -> CGImage? {
+        loop?.cancel()
+        await loop?.value
+        loop = nil
+        defer { stitcher = nil }
+        guard let stitcher else { return nil }
+        return await Task.detached(priority: .userInitiated) { stitcher.makeImage() }.value
+    }
+
+    func cancel() {
+        loop?.cancel()
+        loop = nil
+        stitcher = nil
+    }
 }

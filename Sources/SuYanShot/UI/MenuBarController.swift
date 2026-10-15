@@ -13,10 +13,14 @@ final class MenuBarController: NSObject {
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "素顏 Shot")
         let menu = NSMenu()
+        actionItems[.allInOne] = item("All-in-One", symbol: "viewfinder", action: #selector(allInOneCapture))
+        menu.addItem(actionItems[.allInOne]!)
+        menu.addItem(.separator())
         actionItems[.region] = item("框選截圖", symbol: "rectangle.dashed", action: #selector(regionCapture))
         actionItems[.window] = item("視窗截圖", symbol: "macwindow", action: #selector(windowCapture))
         actionItems[.fullScreen] = item("全螢幕截圖", symbol: "display", action: #selector(fullScreenCapture))
-        [ShortcutAction.region, .window, .fullScreen].forEach { menu.addItem(actionItems[$0]!) }
+        actionItems[.scroll] = item("捲動截圖", symbol: "scroll", action: #selector(scrollCapture))
+        [ShortcutAction.region, .window, .fullScreen, .scroll].forEach { menu.addItem(actionItems[$0]!) }
         let delayed = item("延遲截圖", symbol: "timer", action: nil)
         let delayedMenu = NSMenu(title: "延遲截圖")
         for option in DelayOption.allCases {
@@ -55,9 +59,11 @@ final class MenuBarController: NSObject {
         return item
     }
 
+    @objc private func allInOneCapture() { coordinator.captureAllInOne() }
     @objc private func regionCapture() { coordinator.captureRegion() }
     @objc private func windowCapture() { coordinator.captureWindow() }
     @objc private func fullScreenCapture() { coordinator.captureFullScreen() }
+    @objc private func scrollCapture() { coordinator.captureScrolling() }
     @objc private func delayCapture(_ sender: NSMenuItem) { if let option = sender.representedObject as? DelayOption { coordinator.captureDelayed(option) } }
     @objc private func openFolder() { coordinator.openCaptureFolder() }
     @objc private func showSettings() { openSettings() }

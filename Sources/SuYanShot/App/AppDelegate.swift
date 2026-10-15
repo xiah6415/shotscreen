@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .window: self?.coordinator.captureWindow()
             case .fullScreen: self?.coordinator.captureFullScreen()
             case .delayed: self?.coordinator.captureDelayed(.three)
+            case .scroll: self?.coordinator.captureScrolling()
+            case .allInOne: self?.coordinator.captureAllInOne()
             }
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
@@ -41,8 +43,12 @@ final class CaptureCoordinator {
     private lazy var fullScreenService = FullScreenCaptureService(captureService: captureService)
     private lazy var windowService = WindowCaptureService(captureService: captureService)
     private let regionSelector = RegionSelector()
+    private let allInOneSelector = AllInOneSelector()
     private let windowPicker = WindowPicker()
     private let countdown = CountdownHUD()
+    private lazy var scrollService: ScrollCaptureService = ManualScrollCaptureService(captureService: captureService)
+    private let scrollHUD = ScrollCaptureHUD()
+    private var isScrollCapturing = false
     private let exporter = ImageExporter()
     private lazy var thumbnail = FloatingThumbnailController(exporter: exporter) { [weak self] in self?.annotate($0) }
     private var editors: [AnnotationEditorController] = []
@@ -51,14 +57,38 @@ final class CaptureCoordinator {
         guard ensurePermission() else { return }
         regionSelector.begin { [weak self] result in
             guard let self, case let .success(selection) = result else { return }
-            Task { @MainActor in
-                do {
-                    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                    guard let display = content.displays.first(where: { $0.displayID == selection.screen.displayID }) else { throw CaptureError.noDisplay }
-                    let image = try await self.captureService.capture(display: display, sourceRect: selection.sourceRectPixels)
-                    self.finish(CapturedImage(image: image, mode: .region, capturedAt: .now))
-                } catch { self.present(error) }
+            self.capture(selection)
+        }
+    }
+
+    /// Region, scroll, window and full-screen capture from one overlay.
+    func captureAllInOne() {
+        if isScrollCapturing { finishScrolling(); return }
+        guard ensurePermission() else { return }
+        allInOneSelector.begin { [weak self] action in
+            guard let self, let action else { return }
+            switch action {
+            case let .capture(selection): self.capture(selection)
+            case let .scroll(selection): self.startScrolling(selection)
+            case .window: self.captureWindow()
+            case let .fullScreen(screen): self.captureFullScreen(on: screen)
             }
+        }
+    }
+
+    private func display(for screen: NSScreen) async throws -> SCDisplay {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else { throw CaptureError.noDisplay }
+        return display
+    }
+
+    private func capture(_ selection: RegionSelection) {
+        Task { @MainActor in
+            do {
+                let display = try await display(for: selection.screen)
+                let image = try await captureService.capture(display: display, sourceRect: selection.sourceRectPixels)
+                finish(CapturedImage(image: image, mode: .region, capturedAt: .now))
+            } catch { present(error) }
         }
     }
 
@@ -78,17 +108,58 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Captures the display under the pointer without asking.
-    func captureFullScreen() {
+    /// Captures the display under the pointer (or `screen`) without asking.
+    func captureFullScreen(on screen: NSScreen? = nil) {
         guard ensurePermission() else { return }
         Task { @MainActor in
             do {
                 let displays = try await fullScreenService.availableDisplays()
-                let target = NSScreen.underMouse?.displayID
+                let target = (screen ?? NSScreen.underMouse)?.displayID
                 guard let display = displays.first(where: { $0.displayID == target }) ?? displays.first else { throw CaptureError.noDisplay }
                 finish(try await fullScreenService.capture(display))
             } catch { present(error) }
         }
+    }
+
+    /// Select a region, then the user scrolls while frames are stitched. Running it again finishes the capture.
+    func captureScrolling() {
+        if isScrollCapturing { finishScrolling(); return }
+        guard ensurePermission() else { return }
+        regionSelector.begin { [weak self] result in
+            guard let self, case let .success(selection) = result else { return }
+            self.startScrolling(selection)
+        }
+    }
+
+    private func startScrolling(_ selection: RegionSelection) {
+        Task { @MainActor in
+            do {
+                let display = try await display(for: selection.screen)
+                isScrollCapturing = true
+                let globalRegion = selection.rectInScreenPoints.offsetBy(dx: selection.screen.frame.minX, dy: selection.screen.frame.minY)
+                scrollHUD.show(around: globalRegion,
+                               onDone: { [weak self] in self?.finishScrolling() },
+                               onCancel: { [weak self] in self?.cancelScrolling() })
+                scrollService.start(configuration: ScrollCaptureConfiguration(display: display, sourceRect: selection.sourceRectPixels)) { [weak self] progress in
+                    self?.scrollHUD.update(progress)
+                }
+            } catch { present(error) }
+        }
+    }
+
+    private func finishScrolling() {
+        guard isScrollCapturing else { return }
+        isScrollCapturing = false
+        scrollHUD.hide()
+        Task { @MainActor in
+            if let image = await scrollService.finish() { finish(CapturedImage(image: image, mode: .scroll, capturedAt: .now)) }
+        }
+    }
+
+    private func cancelScrolling() {
+        isScrollCapturing = false
+        scrollHUD.hide()
+        scrollService.cancel()
     }
 
     func captureDelayed(_ delay: DelayOption) {

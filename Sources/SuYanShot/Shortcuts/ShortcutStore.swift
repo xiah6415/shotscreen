@@ -9,7 +9,9 @@ final class ShortcutStore: ObservableObject {
         .region: KeyShortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: [.command, .shift], key: "1"),
         .window: KeyShortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: [.command, .shift], key: "2"),
         .fullScreen: KeyShortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: [.command, .shift], key: "3"),
-        .delayed: KeyShortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: [.command, .shift], key: "4")
+        .delayed: KeyShortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: [.command, .shift], key: "4"),
+        .scroll: KeyShortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: [.command, .shift], key: "6"),
+        .allInOne: KeyShortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: [.command, .shift], key: "5")
     ]
 
     @Published private(set) var shortcuts: [ShortcutAction: KeyShortcut]
@@ -22,16 +24,23 @@ final class ShortcutStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let storageKey = "shortcuts"
+    /// Actions that existed when shortcuts were last saved, so actions added later still get their default.
+    private let knownActionsKey = "shortcutsKnownActions"
     private var keyMonitor: Any?
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         if let data = userDefaults.data(forKey: storageKey),
            let saved = try? JSONDecoder().decode([String: KeyShortcut].self, from: data) {
-            // Once saved, a missing action means the user cleared it.
-            shortcuts = Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in
+            // Once saved, a missing action means the user cleared it — unless the action is newer than the save.
+            var loaded = Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in
                 Int(key).flatMap(ShortcutAction.init(rawValue:)).map { ($0, value) }
             })
+            let known = Set(userDefaults.array(forKey: knownActionsKey) as? [Int] ?? [1, 2, 3, 4])
+            for action in ShortcutAction.allCases where !known.contains(action.rawValue) && loaded[action] == nil {
+                if let fallback = Self.defaults[action], !loaded.values.contains(fallback) { loaded[action] = fallback }
+            }
+            shortcuts = loaded
         } else {
             shortcuts = Self.defaults
         }
@@ -89,6 +98,7 @@ final class ShortcutStore: ObservableObject {
     private func save() {
         let encoded = Dictionary(uniqueKeysWithValues: shortcuts.map { (String($0.key.rawValue), $0.value) })
         if let data = try? JSONEncoder().encode(encoded) { userDefaults.set(data, forKey: storageKey) }
+        userDefaults.set(ShortcutAction.allCases.map(\.rawValue), forKey: knownActionsKey)
         onChange?()
     }
 }

@@ -44,11 +44,11 @@ For an app bundle / signed distribution, create an Xcode project from the packag
 
 ## Agent handoff rules
 1. Read `memory.md` and `HANDOFF TO CLAUDE CODE.md` first.
-2. Preserve the `ScrollCaptureService` boundary; it intentionally does not stitch or control scrolling.
+2. Preserve the `ScrollCaptureService` boundary. Scroll capture is manual: it captures and stitches while the user scrolls, and must never scroll anything itself.
 3. Update `memory.md` after each completed milestone.
 4. State precisely which interactive checks were actually performed.
 
 ## Modules not to change casually
-- `Capture/ScrollCapture.swift`: interface stub only until the technical spike.
+- `Capture/ScrollStitcher.swift`: offset matching and stitching; re-run the synthetic stitching test (see `memory.md`) after changing it.
 - `Models/CaptureModels.swift`: coordinates and scale contracts shared by capture services.
 - `Storage/ImageExporter.swift`: owns naming/export policy; keep that policy out of UI.

@@ -1,7 +1,7 @@
 import AppKit
 
 enum CaptureMode: String, CaseIterable {
-    case region, window, fullScreen, delayed
+    case region, window, fullScreen, delayed, scroll
 }
 
 enum DelayOption: Int, CaseIterable {
