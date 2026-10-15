@@ -1,15 +1,46 @@
 import Carbon.HIToolbox
 
-enum ShortcutAction: Int {
+enum ShortcutAction: Int, CaseIterable {
     case region = 1, window, fullScreen, delayed
+
+    var title: String {
+        switch self {
+        case .region: "框選截圖"
+        case .window: "視窗截圖"
+        case .fullScreen: "全螢幕截圖"
+        case .delayed: "延遲截圖（3 秒）"
+        }
+    }
 }
 
+/// Registers Carbon global hotkeys. `apply` can be called repeatedly; it replaces the previous registrations.
 final class ShortcutManager {
     var onAction: ((ShortcutAction) -> Void)?
-    private var hotKeys: [EventHotKeyRef?] = []
+    private var hotKeys: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
 
-    func registerDefaults() {
+    /// Returns the actions that could not be registered.
+    @discardableResult
+    func apply(_ shortcuts: [ShortcutAction: KeyShortcut]) -> Set<ShortcutAction> {
+        installHandlerIfNeeded()
+        unregisterAll()
+        var failed: Set<ShortcutAction> = []
+        for (action, shortcut) in shortcuts {
+            var ref: EventHotKeyRef?
+            let id = EventHotKeyID(signature: OSType(0x53595348), id: UInt32(action.rawValue)) // SYSH
+            let status = RegisterEventHotKey(shortcut.keyCode, shortcut.carbonModifiers, id, GetApplicationEventTarget(), 0, &ref)
+            if status == noErr, let ref { hotKeys.append(ref) } else { failed.insert(action) }
+        }
+        return failed
+    }
+
+    func unregisterAll() {
+        hotKeys.forEach { UnregisterEventHotKey($0) }
+        hotKeys = []
+    }
+
+    private func installHandlerIfNeeded() {
+        guard handler == nil else { return }
         let eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
             guard let event, let userData else { return noErr }
@@ -19,22 +50,10 @@ final class ShortcutManager {
             if let action = ShortcutAction(rawValue: Int(hotKeyID.id)) { manager.onAction?(action) }
             return noErr
         }, 1, [eventType], Unmanaged.passUnretained(self).toOpaque(), &handler)
-
-        register(.region, keyCode: 18)     // ⌘⇧1
-        register(.window, keyCode: 19)     // ⌘⇧2
-        register(.fullScreen, keyCode: 20) // ⌘⇧3
-        register(.delayed, keyCode: 21)    // ⌘⇧4
-    }
-
-    private func register(_ action: ShortcutAction, keyCode: UInt32) {
-        var ref: EventHotKeyRef?
-        let id = EventHotKeyID(signature: OSType(0x53595348), id: UInt32(action.rawValue)) // SYSH
-        let status = RegisterEventHotKey(keyCode, UInt32(cmdKey | shiftKey), id, GetApplicationEventTarget(), 0, &ref)
-        if status == noErr { hotKeys.append(ref) }
     }
 
     deinit {
-        hotKeys.forEach { hotKey in if let hotKey { UnregisterEventHotKey(hotKey) } }
+        unregisterAll()
         if let handler { RemoveEventHandler(handler) }
     }
 }

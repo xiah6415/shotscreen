@@ -4,12 +4,14 @@ import ScreenCaptureKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = CaptureCoordinator()
+    private let shortcutStore = ShortcutStore()
     private let shortcuts = ShortcutManager()
     private var menuBarController: MenuBarController?
+    private lazy var settings = SettingsWindowController(store: shortcutStore)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        menuBarController = MenuBarController(coordinator: coordinator)
+        menuBarController = MenuBarController(coordinator: coordinator) { [weak self] in self?.settings.show() }
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()
@@ -18,7 +20,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .delayed: self?.coordinator.captureDelayed(.three)
             }
         }
-        shortcuts.registerDefaults()
+        shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
+        applyShortcuts()
+    }
+
+    /// Global hotkeys are paused while the settings window records a new shortcut.
+    private func applyShortcuts() {
+        if shortcutStore.recordingAction != nil {
+            shortcuts.unregisterAll()
+        } else {
+            shortcutStore.unavailable = shortcuts.apply(shortcutStore.shortcuts)
+        }
+        menuBarController?.update(shortcuts: shortcutStore.shortcuts)
     }
 }
 
