@@ -44,7 +44,7 @@ For an app bundle / signed distribution, create an Xcode project from the packag
 
 ## Agent handoff rules
 1. Read `memory.md` and `HANDOFF TO CLAUDE CODE.md` first.
-2. Preserve the `ScrollCaptureService` boundary. Scroll capture is manual: it captures and stitches while the user scrolls, and must never scroll anything itself.
+2. Preserve the `ScrollCaptureService` boundary. Scrolling is manual by default; auto scroll (added at the user's request on 2026-10-15) only runs when the user turns it on and must keep pausing at checkpoints to ask before continuing.
 3. Update `memory.md` after each completed milestone.
 4. State precisely which interactive checks were actually performed.
 

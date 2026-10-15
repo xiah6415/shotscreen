@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// While a scroll capture runs: a click-through dashed border just outside the region (so it is never captured),
-/// a small control panel next to it with progress and Done / Cancel, and a live preview of what is stitched so far.
+/// a small control panel next to it with progress, auto scroll and Done / Cancel, and a live preview of what is stitched so far.
 @MainActor
 final class ScrollCaptureHUD {
     private var border: NSPanel?
@@ -12,11 +12,12 @@ final class ScrollCaptureHUD {
     private let model = ScrollHUDModel()
 
     /// `region` is in global Cocoa coordinates.
-    func show(around region: CGRect, onDone: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    func show(around region: CGRect, onDone: @escaping () -> Void, onCancel: @escaping () -> Void, onAutoScroll: @escaping (Bool) -> Void) {
         hide()
         model.height = 0
         model.message = nil
         model.preview = nil
+        model.auto = .off
 
         let inset: CGFloat = 4
         let border = NSPanel(contentRect: region.insetBy(dx: -inset, dy: -inset), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -29,7 +30,7 @@ final class ScrollCaptureHUD {
         border.orderFrontRegardless()
         self.border = border
 
-        let size = NSSize(width: 360, height: 52)
+        let size = NSSize(width: ScrollHUDView.width, height: 52)
         let screen = NSScreen.screens.first { $0.frame.intersects(region) }?.visibleFrame ?? region
         let x = min(max(region.midX - size.width / 2, screen.minX + 8), screen.maxX - size.width - 8)
         // Below the region if there is room, otherwise above, otherwise inside along the bottom edge.
@@ -46,7 +47,7 @@ final class ScrollCaptureHUD {
         controls.hasShadow = true
         controls.level = .statusBar
         controls.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        controls.contentView = NSHostingView(rootView: ScrollHUDView(model: model, onDone: onDone, onCancel: onCancel))
+        controls.contentView = NSHostingView(rootView: ScrollHUDView(model: model, onDone: onDone, onCancel: onCancel, onAutoScroll: onAutoScroll))
         controls.orderFrontRegardless()
         self.controls = controls
 
@@ -74,11 +75,15 @@ final class ScrollCaptureHUD {
         if let image = progress.preview {
             model.preview = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
         }
-        switch progress.lastResult {
-        case .rejected: model.message = "沒對上，請慢一點往下捲"
-        case .limitReached: model.message = "已達長度上限，請按完成"
-        case .appended: model.message = nil
-        case .first, .unchanged: break
+        model.auto = progress.auto
+        switch (progress.auto, progress.lastResult) {
+        case (_, .limitReached): model.message = "已達長度上限，請按完成"
+        case (.checkpoint, _): model.message = "已自動往下捲了一段，要繼續嗎？"
+        case (.reachedEnd, _): model.message = "已經到底了，按完成產生長圖"
+        case (.running, _): model.message = nil
+        case (.off, .rejected): model.message = "沒對上，請慢一點往下捲"
+        case (.off, .appended): model.message = nil
+        case (.off, _): break
         }
     }
 
@@ -96,6 +101,7 @@ private final class ScrollHUDModel: ObservableObject {
     @Published var height = 0
     @Published var message: String?
     @Published var preview: NSImage?
+    @Published var auto: AutoScrollStatus = .off
 }
 
 /// Stitched-so-far thumbnail, pinned to its newest (bottom) part once it is taller than the panel.
@@ -125,9 +131,13 @@ private struct ScrollPreviewView: View {
 }
 
 private struct ScrollHUDView: View {
+    static let width: CGFloat = 470
     @ObservedObject var model: ScrollHUDModel
     let onDone: () -> Void
     let onCancel: () -> Void
+    let onAutoScroll: (Bool) -> Void
+
+    private var placeholder: String { model.auto == .running ? "自動捲動中…" : "往下捲動要截的內容" }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -135,7 +145,7 @@ private struct ScrollHUDView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.message ?? "往下捲動要截的內容")
+                Text(model.message ?? placeholder)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(model.message == nil ? .primary : Color.orange)
                 Text(model.height > 0 ? "已拼接 \(model.height) px" : "準備中…")
@@ -143,12 +153,31 @@ private struct ScrollHUDView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
+            autoScrollButton
             Button("取消", action: onCancel)
             Button("完成", action: onDone).buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 12)
-        .frame(width: 360, height: 52)
+        .frame(width: Self.width, height: 52)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+extension ScrollHUDView {
+    @ViewBuilder private var autoScrollButton: some View {
+        switch model.auto {
+        case .off:
+            Button { onAutoScroll(true) } label: { Label("自動捲動", systemImage: "play.fill") }
+                .help("自動往下捲，每捲一段會停下來問你要不要繼續")
+        case .running:
+            Button { onAutoScroll(false) } label: { Label("暫停", systemImage: "pause.fill") }
+        case .checkpoint:
+            Button { onAutoScroll(true) } label: { Label("繼續往下", systemImage: "arrow.down") }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+        case .reachedEnd:
+            EmptyView()
+        }
     }
 }
 

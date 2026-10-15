@@ -139,12 +139,36 @@ final class CaptureCoordinator {
                 let globalRegion = selection.rectInScreenPoints.offsetBy(dx: selection.screen.frame.minX, dy: selection.screen.frame.minY)
                 scrollHUD.show(around: globalRegion,
                                onDone: { [weak self] in self?.finishScrolling() },
-                               onCancel: { [weak self] in self?.cancelScrolling() })
-                scrollService.start(configuration: ScrollCaptureConfiguration(display: display, sourceRect: selection.sourceRectPixels)) { [weak self] progress in
+                               onCancel: { [weak self] in self?.cancelScrolling() },
+                               onAutoScroll: { [weak self] enabled in self?.setAutoScroll(enabled) })
+                // CoreGraphics global coordinates are top-left origin of the primary display.
+                let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+                let configuration = ScrollCaptureConfiguration(
+                    display: display,
+                    sourceRect: selection.sourceRectPixels,
+                    scrollPoint: CGPoint(x: globalRegion.midX, y: primaryHeight - globalRegion.midY),
+                    regionHeightPoints: globalRegion.height)
+                scrollService.start(configuration: configuration) { [weak self] progress in
                     self?.scrollHUD.update(progress)
                 }
             } catch { present(error) }
         }
+    }
+
+    /// Auto scroll posts scroll-wheel events, which needs Accessibility permission.
+    private func setAutoScroll(_ enabled: Bool) {
+        guard !enabled || AutoScroller.isTrusted else {
+            AutoScroller.requestTrust()
+            let alert = NSAlert()
+            alert.messageText = "自動捲動需要「輔助使用」權限"
+            alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開素顏 Shot，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"
+            alert.addButton(withTitle: "打開系統設定")
+            alert.addButton(withTitle: "先手動捲")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn { PermissionsManager.openAccessibilitySettings() }
+            return
+        }
+        scrollService.setAutoScroll(enabled)
     }
 
     private func finishScrolling() {

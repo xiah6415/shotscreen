@@ -21,6 +21,12 @@ enum PermissionsManager {
         }
     }
 
+    static func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// A newly granted Screen Recording permission only applies after the app restarts.
     static func relaunch() {
         let configuration = NSWorkspace.OpenConfiguration()
