@@ -55,8 +55,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-echo "→ Ad-hoc signing"
-codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+# A stable identity keeps Screen Recording / Accessibility grants across rebuilds
+# (see scripts/make-signing-cert.sh); fall back to ad-hoc, which macOS treats as a new app every build.
+SIGNING_IDENTITY="SuYanShot Local Signing"
+SIGNING_HASH="$(security find-identity -p codesigning | awk -v name="\"$SIGNING_IDENTITY\"" 'index($0, name) { print $2; exit }')"
+if [[ -n "$SIGNING_HASH" ]]; then
+    echo "→ Signing with '$SIGNING_IDENTITY'"
+    codesign --force --sign "$SIGNING_HASH" --identifier "$BUNDLE_ID" "$APP"
+else
+    echo "→ Ad-hoc signing (run scripts/make-signing-cert.sh once to keep permissions across rebuilds)"
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+fi
 
 echo "✓ Built $APP"
 

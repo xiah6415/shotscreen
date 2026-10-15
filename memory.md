@@ -27,6 +27,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 - Git repository initialized on branch `main`; initial commit is `6a41e5c` (`Initial native screenshot app foundation`).
 - 2026-10-15: `scripts/make-app.sh` packages the release build as an ad-hoc-signed menu-bar `素顏 Shot.app` (bundle id `local.suyanshot.app`, `LSUIElement`); `--install` copies it to `/Applications` and relaunches. Installed and observed running.
 - 2026-10-15 UI pass (Chinese UI): menu items with SF Symbols and ⌘⇧N hints, 打開截圖資料夾 / 權限設定 replace the placeholder Settings alert; region overlay has crosshair guides, crosshair cursor, right-click cancel; `Capture/WindowPicker.swift` replaces the window popup alert with hover-highlight + click (z-order from CGWindowList, own windows excluded); full screen captures the display under the pointer with no picker; delayed capture shows `UI/CountdownHUD.swift` (click to cancel) instead of a modal alert; floating thumbnail redesigned (hover Copy/Save/close, auto-dismiss after 8s unless hovered, drags out as a temp PNG file and closes after a successful drop); window captures now request full Retina resolution. Shared overlay panel and `NSScreen.displayID` / `underMouse` helpers live in `Capture/ScreenOverlay.swift`. `swift build` passes with no warnings; app reinstalled and observed running. Interactive behaviour checked by the user on 2026-10-15: works as expected.
+- 2026-10-15 permission prompts: the user saw the Screen Recording prompt on every capture. Cause: ad-hoc signing makes the TCC designated requirement a cdhash, so each rebuild is a new app. Fix: `scripts/make-signing-cert.sh` creates a self-signed `SuYanShot Local Signing` identity (login keychain, untrusted is fine for codesign) and `make-app.sh` signs with it when present, giving a requirement of identifier + certificate leaf. Code now checks permission before any ScreenCaptureKit call, triggers the system prompt at most once per launch, and otherwise shows its own alert (打開系統設定 / 重新啟動 App). The user re-granted once after the first stably signed install and confirmed the prompt no longer repeats.
 
 ## In Progress
 - Manual interactive capture validation on a desktop with Screen Recording permission.
@@ -37,7 +38,8 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 
 ## Known Issues
 - Screen Recording and Accessibility permissions must be granted by the user at runtime.
-- The `.app` is ad-hoc signed and built for the host architecture only (universal builds need full Xcode). Reinstalling a rebuilt app may make macOS ask for Screen Recording permission again.
+- The `.app` is built for the host architecture only (universal builds need full Xcode).
+- macOS 15+ still re-confirms ScreenCaptureKit access periodically (the "bypass the private window picker" prompt); that is system policy, not a bug.
 - Interactive GUI and multi-display validation require a logged-in macOS desktop session.
 - Default ⌘⇧3 / ⌘⇧4 collide with macOS's own screenshot shortcuts; if the system shortcuts stay enabled, those two hotkeys may not reach the app.
 - This machine has Command Line Tools selected instead of full Xcode, so `swift test` cannot import XCTest. The XCTest source is present and should run from full Xcode / its selected toolchain.

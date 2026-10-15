@@ -4,7 +4,7 @@ import ScreenCaptureKit
 @MainActor
 final class ScreenCaptureService {
     func capture(display: SCDisplay, sourceRect: CGRect? = nil) async throws -> CGImage {
-        guard PermissionsManager.canCaptureScreen || PermissionsManager.requestScreenCaptureAccess() else {
+        guard PermissionsManager.canCaptureScreen else {
             throw CaptureError.permissionDenied
         }
 
@@ -20,7 +20,7 @@ final class ScreenCaptureService {
     }
 
     func capture(window: SCWindow) async throws -> CGImage {
-        guard PermissionsManager.canCaptureScreen || PermissionsManager.requestScreenCaptureAccess() else {
+        guard PermissionsManager.canCaptureScreen else {
             throw CaptureError.permissionDenied
         }
         let filter = SCContentFilter(desktopIndependentWindow: window)

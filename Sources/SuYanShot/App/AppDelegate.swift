@@ -34,6 +34,7 @@ final class CaptureCoordinator {
     private lazy var thumbnail = FloatingThumbnailController(exporter: exporter)
 
     func captureRegion() {
+        guard ensurePermission() else { return }
         regionSelector.begin { [weak self] result in
             guard let self, case let .success(selection) = result else { return }
             Task { @MainActor in
@@ -48,6 +49,7 @@ final class CaptureCoordinator {
     }
 
     func captureWindow() {
+        guard ensurePermission() else { return }
         Task { @MainActor in
             do {
                 let windows = try await windowService.shareableWindows()
@@ -64,6 +66,7 @@ final class CaptureCoordinator {
 
     /// Captures the display under the pointer without asking.
     func captureFullScreen() {
+        guard ensurePermission() else { return }
         Task { @MainActor in
             do {
                 let displays = try await fullScreenService.availableDisplays()
@@ -75,6 +78,7 @@ final class CaptureCoordinator {
     }
 
     func captureDelayed(_ delay: DelayOption) {
+        guard ensurePermission() else { return }
         countdown.start(seconds: delay.rawValue) { [weak self] in self?.captureFullScreen() }
     }
 
@@ -85,14 +89,31 @@ final class CaptureCoordinator {
         thumbnail.show(captured)
     }
 
-    private func present(_ error: Error) {
-        let alert = NSAlert(error: error)
-        if case CaptureError.permissionDenied = error {
-            alert.addButton(withTitle: "打開系統設定")
-            alert.addButton(withTitle: "取消")
-            if alert.runModal() == .alertFirstButtonReturn { PermissionsManager.openScreenCaptureSettings() }
-        } else {
-            alert.runModal()
+    /// Checked before any ScreenCaptureKit call, since those calls trigger the system prompt themselves.
+    private func ensurePermission() -> Bool {
+        if PermissionsManager.canCaptureScreen { return true }
+        if PermissionsManager.requestOncePerLaunch() { return false } // macOS shows its own prompt this time
+        showPermissionHelp()
+        return false
+    }
+
+    private func showPermissionHelp() {
+        let alert = NSAlert()
+        alert.messageText = "素顏 Shot 需要「螢幕錄製」權限"
+        alert.informativeText = "到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」打開素顏 Shot。\n打開之後要重新啟動 App 才會生效。"
+        alert.addButton(withTitle: "打開系統設定")
+        alert.addButton(withTitle: "重新啟動 App")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: PermissionsManager.openScreenCaptureSettings()
+        case .alertSecondButtonReturn: PermissionsManager.relaunch()
+        default: break
         }
+    }
+
+    private func present(_ error: Error) {
+        if case CaptureError.permissionDenied = error { showPermissionHelp(); return }
+        NSAlert(error: error).runModal()
     }
 }
