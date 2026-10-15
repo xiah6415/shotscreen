@@ -36,7 +36,8 @@ Grant **Screen Recording** access when macOS asks, then relaunch the app if need
 - Region selection overlay with drag, Escape cancellation, dimensions, Retina-aware conversion, and multi-display overlays
 - Full-display and shareable-window capture with ScreenCaptureKit
 - Configurable 3/5/10-second delayed capture
-- Clipboard copy, PNG export, and floating preview with Copy / Save / Delete / drag-out
+- Clipboard copy, PNG export, and floating preview with Copy / Save / Annotate / drag-out
+- Annotation editor: arrows, boxes, ellipses, lines, pen, highlighter, text, numbered steps, pixelate, undo/redo
 - Global hotkeys for region, window, full screen, and delayed capture, customizable in 設定… (⌘,)
 
 ## Known limitations

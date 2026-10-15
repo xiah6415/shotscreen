@@ -44,7 +44,8 @@ final class CaptureCoordinator {
     private let windowPicker = WindowPicker()
     private let countdown = CountdownHUD()
     private let exporter = ImageExporter()
-    private lazy var thumbnail = FloatingThumbnailController(exporter: exporter)
+    private lazy var thumbnail = FloatingThumbnailController(exporter: exporter) { [weak self] in self?.annotate($0) }
+    private var editors: [AnnotationEditorController] = []
 
     func captureRegion() {
         guard ensurePermission() else { return }
@@ -93,6 +94,13 @@ final class CaptureCoordinator {
     func captureDelayed(_ delay: DelayOption) {
         guard ensurePermission() else { return }
         countdown.start(seconds: delay.rawValue) { [weak self] in self?.captureFullScreen() }
+    }
+
+    func annotate(_ captured: CapturedImage) {
+        let editor = AnnotationEditorController(captured: captured, exporter: exporter)
+        editor.onClose = { [weak self] closed in self?.editors.removeAll { $0 === closed } }
+        editors.append(editor)
+        editor.show()
     }
 
     func openCaptureFolder() { NSWorkspace.shared.open(exporter.defaultDirectory) }

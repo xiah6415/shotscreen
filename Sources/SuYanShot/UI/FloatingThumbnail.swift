@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// CleanShot-style preview card in the bottom-right corner: hover for Copy / Save, drag out as a PNG file,
+/// CleanShot-style preview card in the bottom-right corner: hover for Copy / Save / Annotate, double-click to annotate, drag out as a PNG file,
 /// and it slides away on its own after a few seconds unless the pointer is over it.
 @MainActor
 final class FloatingThumbnailController: NSObject {
@@ -11,11 +11,15 @@ final class FloatingThumbnailController: NSObject {
     private var dismissTimer: Timer?
     private let model = ThumbnailModel()
     private let exporter: ImageExporter
+    private let onAnnotate: (CapturedImage) -> Void
     private let cardWidth: CGFloat = 260
     private let margin: CGFloat = 16
     private let autoDismissDelay: TimeInterval = 8
 
-    init(exporter: ImageExporter) { self.exporter = exporter }
+    init(exporter: ImageExporter, onAnnotate: @escaping (CapturedImage) -> Void) {
+        self.exporter = exporter
+        self.onAnnotate = onAnnotate
+    }
 
     func show(_ captured: CapturedImage) {
         dismiss(animated: false)
@@ -25,7 +29,7 @@ final class FloatingThumbnailController: NSObject {
 
         let image = NSImage(cgImage: captured.image, size: NSSize(width: captured.image.width, height: captured.image.height))
         let aspect = CGFloat(captured.image.height) / CGFloat(max(1, captured.image.width))
-        let size = NSSize(width: cardWidth, height: min(220, max(110, cardWidth * aspect)))
+        let size = NSSize(width: cardWidth, height: min(220, max(140, cardWidth * aspect)))
         let view = FloatingThumbnailView(
             image: image,
             size: size,
@@ -33,6 +37,7 @@ final class FloatingThumbnailController: NSObject {
             actions: ThumbnailActions(
                 copy: { [weak self] in self?.copy() },
                 save: { [weak self] in self?.save() },
+                annotate: { [weak self] in self?.annotate() },
                 close: { [weak self] in self?.dismiss(animated: true) },
                 hover: { [weak self] in self?.hoverChanged($0) },
                 dragFile: { [weak self] in self?.temporaryPNG() },
@@ -73,6 +78,12 @@ final class FloatingThumbnailController: NSObject {
             _ = try exporter.exportPNG(captured.image, date: captured.capturedAt)
             flash("已存到桌面") { [weak self] in self?.dismiss(animated: true) }
         } catch { NSAlert(error: error).runModal() }
+    }
+
+    private func annotate() {
+        guard let captured else { return }
+        dismiss(animated: true)
+        onAnnotate(captured)
     }
 
     /// Writes the capture to a temporary PNG once, so it can be dragged into Finder, chats, or editors as a file.
@@ -130,6 +141,7 @@ private final class ThumbnailModel: ObservableObject {
 private struct ThumbnailActions {
     let copy: () -> Void
     let save: () -> Void
+    let annotate: () -> Void
     let close: () -> Void
     let hover: (Bool) -> Void
     let dragFile: () -> URL?
@@ -167,6 +179,7 @@ private struct FloatingThumbnailView: View {
                 VStack(spacing: 8) {
                     PillButton(title: "複製", systemImage: "doc.on.doc", action: actions.copy)
                     PillButton(title: "儲存", systemImage: "square.and.arrow.down", action: actions.save)
+                    PillButton(title: "標註", systemImage: "pencil.tip.crop.circle", action: actions.annotate)
                 }
                 .transition(.opacity)
 
@@ -232,7 +245,7 @@ private final class DragHoverView: NSView, NSDraggingSource {
     }
     override func mouseEntered(with event: NSEvent) { actions?.hover(true) }
     override func mouseExited(with event: NSEvent) { actions?.hover(false) }
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) { if event.clickCount == 2 { actions?.annotate() } }
     override func mouseDragged(with event: NSEvent) {
         guard let url = actions?.dragFile() else { return }
         let item = NSDraggingItem(pasteboardWriter: url as NSURL)

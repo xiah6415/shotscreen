@@ -72,6 +72,8 @@ echo "✓ Built $APP"
 if [[ "${1:-}" == "--install" ]]; then
     DEST="/Applications/$APP_NAME.app"
     pkill -x "$EXECUTABLE" 2>/dev/null || true
+    # Wait for the old instance to exit, or `open` below can fail with error -600.
+    for _ in {1..50}; do pgrep -x "$EXECUTABLE" >/dev/null || break; sleep 0.1; done
     rm -rf "$DEST"
     cp -R "$APP" "$DEST"
     echo "✓ Installed $DEST"

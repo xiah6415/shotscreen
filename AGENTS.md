@@ -15,7 +15,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - `UI`: menu bar and floating thumbnail UI.
 - `Shortcuts`: Carbon-based global hotkey registration.
 - `Models`: value types shared between modules.
-- `Annotation`: model-only extension point.
+- `Annotation`: annotation editor — model (`AnnotationModel`), document/undo state, renderer shared by canvas and export, AppKit canvas, editor window.
 
 `Tests/SuYanShotTests` contains non-interactive unit tests. Keep UI orchestration out of capture and storage services.
 
@@ -25,7 +25,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - Avoid third-party packages and premature abstractions.
 - Build after each cohesive change and add unit tests for deterministic logic.
 - Record material architecture decisions and handoff state in `memory.md`.
-- Do not modify unrelated files or implement OCR, cloud, accounts, recording, GIFs, or a full annotation editor in this phase.
+- Do not modify unrelated files or implement OCR, cloud, accounts, recording, or GIFs in this phase. (The annotation editor was added at the user's explicit request on 2026-10-15.)
 
 ## Build and test
 From repository root:
