@@ -25,6 +25,8 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
         let rows: [UInt8]
         /// Same, averaged over blocks of `coarseFactor` rows, for a fast first pass.
         let coarse: [UInt8]
+        /// Small copy for the live preview, made once a frame is accepted.
+        var thumbnail: CGImage?
     }
 
     private let columns = 96
@@ -32,7 +34,9 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
     private var first: Frame?
     private var last: Frame?
     /// Frames appended after the first, with how many new rows each contributed.
-    private var strips: [(image: CGImage, rows: Int)] = []
+    private var strips: [(image: CGImage, thumbnail: CGImage?, rows: Int)] = []
+    /// Width of the live preview produced by `makePreview()`.
+    let previewWidth: Int
     /// Height of a static bottom bar, fixed once detected so the composition stays consistent.
     private var footer: Int?
 
@@ -42,12 +46,16 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
     private let matchThreshold = 3.0
     private let candidateCount = 6
 
-    init(maxHeight: Int = 40_000) { self.maxHeight = maxHeight }
+    init(maxHeight: Int = 40_000, previewWidth: Int = 200) {
+        self.maxHeight = maxHeight
+        self.previewWidth = previewWidth
+    }
 
     func add(_ image: CGImage) -> FrameResult {
         let rows = Self.signature(of: image, columns: columns)
-        let current = Frame(image: image, rows: rows, coarse: downsample(rows, height: image.height))
+        var current = Frame(image: image, rows: rows, coarse: downsample(rows, height: image.height))
         guard let last else {
+            current.thumbnail = thumbnail(of: image)
             first = current
             self.last = current
             height = image.height
@@ -93,30 +101,60 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
         guard height + best <= maxHeight else { return .limitReached }
 
         if footer == nil, bottom > 0 { footer = bottom }
-        strips.append((image, best))
+        current.thumbnail = thumbnail(of: image)
+        strips.append((image, current.thumbnail, best))
         height += best
         self.last = current
         return .appended(rows: best)
     }
 
+    /// The full-resolution stitched image.
+    func makeImage() -> CGImage? { compose(scale: 1, thumbnails: false) }
+
+    /// A `previewWidth`-wide version built from thumbnails, cheap enough to refresh after every frame.
+    func makePreview() -> CGImage? {
+        guard let first else { return nil }
+        return compose(scale: CGFloat(previewWidth) / CGFloat(first.image.width), thumbnails: true)
+    }
+
     /// First frame down to the footer, each new strip, then the footer once from the last frame.
-    func makeImage() -> CGImage? {
+    private func compose(scale: CGFloat, thumbnails: Bool) -> CGImage? {
         guard let first, let last else { return nil }
-        let width = first.image.width, h = first.image.height
+        let h = first.image.height
         let footer = footer ?? 0
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: first.image.colorSpace.flatMap { $0.supportsOutput ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        var y = 0 // top-left origin cursor in the output
-        func place(_ image: CGImage, rows: Range<Int>) {
-            guard !rows.isEmpty, let piece = image.cropping(to: CGRect(x: 0, y: rows.lowerBound, width: width, height: rows.count)) else { return }
-            // CGContext is bottom-left origin.
-            context.draw(piece, in: CGRect(x: 0, y: height - y - rows.count, width: width, height: rows.count))
-            y += rows.count
+        var pieces: [(image: CGImage?, rows: Range<Int>)] = [(thumbnails ? first.thumbnail : first.image, 0..<(h - footer))]
+        for strip in strips { pieces.append((thumbnails ? strip.thumbnail : strip.image, max(0, h - footer - strip.rows)..<(h - footer))) }
+        pieces.append((thumbnails ? last.thumbnail : last.image, (h - footer)..<h))
+
+        let outWidth = max(1, Int((CGFloat(first.image.width) * scale).rounded()))
+        let outHeight = max(1, Int((CGFloat(height) * scale).rounded()))
+        let space = first.image.colorSpace.flatMap { $0.supportsOutput ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(data: nil, width: outWidth, height: outHeight, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = thumbnails ? .medium : .none
+        let frameHeight = CGFloat(h) * scale
+        var y: CGFloat = 0 // top-left-origin cursor in the output
+        for piece in pieces {
+            guard let image = piece.image, !piece.rows.isEmpty else { continue }
+            let pieceHeight = CGFloat(piece.rows.count) * scale
+            // Place the whole frame so its first wanted row lands at the cursor, and clip to just those rows.
+            let frameTop = y - CGFloat(piece.rows.lowerBound) * scale
+            context.saveGState()
+            context.clip(to: CGRect(x: 0, y: CGFloat(outHeight) - y - pieceHeight, width: CGFloat(outWidth), height: pieceHeight))
+            context.draw(image, in: CGRect(x: 0, y: CGFloat(outHeight) - frameTop - frameHeight, width: CGFloat(outWidth), height: frameHeight))
+            context.restoreGState()
+            y += pieceHeight
         }
-        place(first.image, rows: 0..<(h - footer))
-        for strip in strips { place(strip.image, rows: (h - footer - strip.rows)..<(h - footer)) }
-        place(last.image, rows: (h - footer)..<h)
+        return context.makeImage()
+    }
+
+    private func thumbnail(of image: CGImage) -> CGImage? {
+        let scale = CGFloat(previewWidth) / CGFloat(image.width)
+        let size = CGSize(width: previewWidth, height: max(1, Int((CGFloat(image.height) * scale).rounded())))
+        guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(origin: .zero, size: size))
         return context.makeImage()
     }
 

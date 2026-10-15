@@ -1,12 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// While a scroll capture runs: a click-through dashed border just outside the region (so it is never captured)
-/// and a small control panel next to it with progress and Done / Cancel.
+/// While a scroll capture runs: a click-through dashed border just outside the region (so it is never captured),
+/// a small control panel next to it with progress and Done / Cancel, and a live preview of what is stitched so far.
 @MainActor
 final class ScrollCaptureHUD {
     private var border: NSPanel?
     private var controls: NSPanel?
+    private var preview: NSPanel?
+    private let previewWidth: CGFloat = 150
     private let model = ScrollHUDModel()
 
     /// `region` is in global Cocoa coordinates.
@@ -14,6 +16,7 @@ final class ScrollCaptureHUD {
         hide()
         model.height = 0
         model.message = nil
+        model.preview = nil
 
         let inset: CGFloat = 4
         let border = NSPanel(contentRect: region.insetBy(dx: -inset, dy: -inset), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -46,10 +49,31 @@ final class ScrollCaptureHUD {
         controls.contentView = NSHostingView(rootView: ScrollHUDView(model: model, onDone: onDone, onCancel: onCancel))
         controls.orderFrontRegardless()
         self.controls = controls
+
+        // Preview beside the region: right if it fits, else left, else inside the right edge.
+        let previewSize = NSSize(width: previewWidth + 16, height: min(max(region.height, 160), screen.height - 16))
+        var previewX = region.maxX + inset + 10
+        if previewX + previewSize.width > screen.maxX - 8 { previewX = region.minX - inset - 10 - previewSize.width }
+        if previewX < screen.minX + 8 { previewX = region.maxX - previewSize.width - 12 }
+        let previewY = min(max(region.maxY - previewSize.height, screen.minY + 8), screen.maxY - previewSize.height - 8)
+        let preview = NSPanel(contentRect: CGRect(x: previewX, y: previewY, width: previewSize.width, height: previewSize.height),
+                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        preview.isOpaque = false
+        preview.backgroundColor = .clear
+        preview.hasShadow = true
+        preview.ignoresMouseEvents = true
+        preview.level = .statusBar
+        preview.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        preview.contentView = NSHostingView(rootView: ScrollPreviewView(model: model, width: previewWidth))
+        preview.orderFrontRegardless()
+        self.preview = preview
     }
 
     func update(_ progress: ScrollCaptureProgress) {
         model.height = progress.height
+        if let image = progress.preview {
+            model.preview = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        }
         switch progress.lastResult {
         case .rejected: model.message = "沒對上，請慢一點往下捲"
         case .limitReached: model.message = "已達長度上限，請按完成"
@@ -61,14 +85,43 @@ final class ScrollCaptureHUD {
     func hide() {
         border?.orderOut(nil)
         controls?.orderOut(nil)
+        preview?.orderOut(nil)
         border = nil
         controls = nil
+        preview = nil
     }
 }
 
 private final class ScrollHUDModel: ObservableObject {
     @Published var height = 0
     @Published var message: String?
+    @Published var preview: NSImage?
+}
+
+/// Stitched-so-far thumbnail, pinned to its newest (bottom) part once it is taller than the panel.
+private struct ScrollPreviewView: View {
+    @ObservedObject var model: ScrollHUDModel
+    let width: CGFloat
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                if let image = model.preview {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.medium)
+                        .frame(width: width, height: width * image.size.height / max(1, image.size.width))
+                        .frame(width: width, height: geometry.size.height - 16, alignment: .bottom)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else {
+                    ProgressView().controlSize(.small).frame(maxHeight: .infinity)
+                }
+            }
+            .padding(8)
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
 }
 
 private struct ScrollHUDView: View {

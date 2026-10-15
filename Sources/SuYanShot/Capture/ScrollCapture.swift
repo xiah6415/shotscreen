@@ -22,6 +22,8 @@ struct ScrollCaptureConfiguration {
 struct ScrollCaptureProgress {
     let height: Int
     let lastResult: ScrollStitcher.FrameResult
+    /// Narrow rendering of everything stitched so far; nil when nothing new was added.
+    let preview: CGImage?
 }
 
 @MainActor
@@ -41,8 +43,14 @@ final class ManualScrollCaptureService: ScrollCaptureService {
                 let began = ContinuousClock.now
                 if let frame = try? await captureService.capture(display: configuration.display, sourceRect: configuration.sourceRect) {
                     // Matching is CPU work; keep it off the main thread.
-                    let result = await Task.detached(priority: .userInitiated) { stitcher.add(frame) }.value
-                    onProgress(ScrollCaptureProgress(height: stitcher.height, lastResult: result))
+                    let (result, preview) = await Task.detached(priority: .userInitiated) { () -> (ScrollStitcher.FrameResult, CGImage?) in
+                        let result = stitcher.add(frame)
+                        switch result {
+                        case .first, .appended: return (result, stitcher.makePreview())
+                        default: return (result, nil)
+                        }
+                    }.value
+                    onProgress(ScrollCaptureProgress(height: stitcher.height, lastResult: result, preview: preview))
                     if result == .limitReached { break }
                 }
                 let remaining = configuration.interval - (ContinuousClock.now - began)
