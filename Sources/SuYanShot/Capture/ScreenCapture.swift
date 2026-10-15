@@ -24,6 +24,12 @@ final class ScreenCaptureService {
             throw CaptureError.permissionDenied
         }
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: SCStreamConfiguration())
+        // Default configuration size is not Retina-aware; request the window at full backing resolution.
+        let scale = CGFloat(filter.pointPixelScale)
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(1, Int(window.frame.width * scale))
+        configuration.height = max(1, Int(window.frame.height * scale))
+        configuration.showsCursor = false
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
     }
 }

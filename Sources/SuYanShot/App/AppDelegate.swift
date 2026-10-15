@@ -28,7 +28,10 @@ final class CaptureCoordinator {
     private lazy var fullScreenService = FullScreenCaptureService(captureService: captureService)
     private lazy var windowService = WindowCaptureService(captureService: captureService)
     private let regionSelector = RegionSelector()
-    private let thumbnail = FloatingThumbnailController(exporter: ImageExporter())
+    private let windowPicker = WindowPicker()
+    private let countdown = CountdownHUD()
+    private let exporter = ImageExporter()
+    private lazy var thumbnail = FloatingThumbnailController(exporter: exporter)
 
     func captureRegion() {
         regionSelector.begin { [weak self] result in
@@ -36,8 +39,7 @@ final class CaptureCoordinator {
             Task { @MainActor in
                 do {
                     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                    let screenNumber = selection.screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-                    guard let display = content.displays.first(where: { $0.displayID == screenNumber?.uint32Value }) else { throw CaptureError.noDisplay }
+                    guard let display = content.displays.first(where: { $0.displayID == selection.screen.displayID }) else { throw CaptureError.noDisplay }
                     let image = try await self.captureService.capture(display: display, sourceRect: selection.sourceRectPixels)
                     self.finish(CapturedImage(image: image, mode: .region, capturedAt: .now))
                 } catch { self.present(error) }
@@ -50,51 +52,47 @@ final class CaptureCoordinator {
             do {
                 let windows = try await windowService.shareableWindows()
                 guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
-                guard let window = choose(windows: windows) else { return }
-                finish(try await windowService.capture(window))
+                windowPicker.begin(windows: windows) { [weak self] window in
+                    guard let self, let window else { return }
+                    Task { @MainActor in
+                        do { self.finish(try await self.windowService.capture(window)) } catch { self.present(error) }
+                    }
+                }
             } catch { present(error) }
         }
     }
 
+    /// Captures the display under the pointer without asking.
     func captureFullScreen() {
         Task { @MainActor in
             do {
                 let displays = try await fullScreenService.availableDisplays()
-                guard let display = choose(displays: displays) else { throw CaptureError.noDisplay }
+                let target = NSScreen.underMouse?.displayID
+                guard let display = displays.first(where: { $0.displayID == target }) ?? displays.first else { throw CaptureError.noDisplay }
                 finish(try await fullScreenService.capture(display))
             } catch { present(error) }
         }
     }
 
     func captureDelayed(_ delay: DelayOption) {
-        let alert = NSAlert()
-        alert.messageText = "Capture in \(delay.title)"
-        alert.informativeText = "Move the desired window into position."
-        alert.addButton(withTitle: "Start")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(delay.rawValue)) { [weak self] in self?.captureFullScreen() }
+        countdown.start(seconds: delay.rawValue) { [weak self] in self?.captureFullScreen() }
     }
 
-    private func choose(windows: [SCWindow]) -> SCWindow? {
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        windows.forEach { popup.addItem(withTitle: "\($0.owningApplication?.applicationName ?? "Unknown") — \($0.title ?? "Untitled")") }
-        let alert = NSAlert(); alert.messageText = "Choose a window"; alert.accessoryView = popup; alert.addButton(withTitle: "Capture"); alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn ? windows[popup.indexOfSelectedItem] : nil
-    }
-
-    private func choose(displays: [SCDisplay]) -> SCDisplay? {
-        guard !displays.isEmpty else { return nil }
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        displays.enumerated().forEach { popup.addItem(withTitle: "Display \($0.offset + 1) (\($0.element.width) × \($0.element.height))") }
-        let alert = NSAlert(); alert.messageText = "Choose a display"; alert.accessoryView = popup; alert.addButton(withTitle: "Capture"); alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn ? displays[popup.indexOfSelectedItem] : nil
-    }
+    func openCaptureFolder() { NSWorkspace.shared.open(exporter.defaultDirectory) }
 
     private func finish(_ captured: CapturedImage) {
         ClipboardManager.copy(captured.image)
         thumbnail.show(captured)
     }
 
-    private func present(_ error: Error) { NSAlert(error: error).runModal() }
+    private func present(_ error: Error) {
+        let alert = NSAlert(error: error)
+        if case CaptureError.permissionDenied = error {
+            alert.addButton(withTitle: "打開系統設定")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn { PermissionsManager.openScreenCaptureSettings() }
+        } else {
+            alert.runModal()
+        }
+    }
 }
