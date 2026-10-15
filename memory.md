@@ -25,6 +25,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 - Annotation model extension point and explicitly non-functional Scroll Capture interface/model stubs.
 - `swift build` succeeds on 2026-09-09; built executable was launched and observed running.
 - Git repository initialized on branch `main`; initial commit is `6a41e5c` (`Initial native screenshot app foundation`).
+- 2026-10-15: `scripts/make-app.sh` packages the release build as an ad-hoc-signed menu-bar `素顏 Shot.app` (bundle id `local.suyanshot.app`, `LSUIElement`); `--install` copies it to `/Applications` and relaunches. Installed and observed running.
 
 ## In Progress
 - Manual interactive capture validation on a desktop with Screen Recording permission.
@@ -35,6 +36,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 
 ## Known Issues
 - Screen Recording and Accessibility permissions must be granted by the user at runtime.
+- The `.app` is ad-hoc signed and built for the host architecture only (universal builds need full Xcode). Reinstalling a rebuilt app may make macOS ask for Screen Recording permission again.
 - Interactive GUI and multi-display validation require a logged-in macOS desktop session.
 - This machine has Command Line Tools selected instead of full Xcode, so `swift test` cannot import XCTest. The XCTest source is present and should run from full Xcode / its selected toolchain.
 

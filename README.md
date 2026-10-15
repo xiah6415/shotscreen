@@ -16,6 +16,14 @@ swift test
 swift run SuYanShot
 ```
 
+## Install as an app
+
+```sh
+scripts/make-app.sh --install
+```
+
+Builds a release binary, packages it as `素顏 Shot.app` (menu-bar only, ad-hoc signed), installs it to `/Applications`, and launches it. Re-run after pulling changes. Add it under System Settings → General → Login Items to start at login.
+
 ## Permissions
 
 Grant **Screen Recording** access when macOS asks, then relaunch the app if needed. Global shortcuts can require **Accessibility** access. Both are managed in System Settings → Privacy & Security.
