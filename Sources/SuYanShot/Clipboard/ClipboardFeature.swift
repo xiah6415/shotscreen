@@ -7,6 +7,11 @@ final class ClipboardFeature {
     let store = ClipboardStore()
     private let monitor = ClipboardMonitor()
     private lazy var panel = ClipboardPanelController(store: store)
+    private(set) lazy var phoneShare = PhoneShare(store: store) { [weak self] item in
+        guard let self else { return }
+        self.monitor.ignore(changeCount: Paster.write(item, from: self.store))
+    }
+    private lazy var phoneShareWindow = PhoneShareWindowController(share: phoneShare)
     private var enabledObservation: AnyCancellable?
     private var explainedAccessibility = false
 
@@ -19,6 +24,8 @@ final class ClipboardFeature {
     }
 
     func togglePanel() { panel.toggle() }
+
+    func showPhoneShare() { phoneShareWindow.show() }
 
     private func paste(_ item: ClipboardItem, plainText: Bool) {
         monitor.ignore(changeCount: Paster.write(item, from: store, plainText: plainText))

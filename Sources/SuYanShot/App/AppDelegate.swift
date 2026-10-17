@@ -15,7 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController(
             coordinator: coordinator,
             openSettings: { [weak self] in self?.settings.show() },
-            openClipboard: { [weak self] in self?.clipboard.togglePanel() })
+            openClipboard: { [weak self] in self?.clipboard.togglePanel() },
+            openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() })
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()

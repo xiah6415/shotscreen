@@ -51,6 +51,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>素顏 Shot 需要螢幕錄製權限才能截圖。</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>素顏 Shot 會在你按「在手機上開啟」時，讓同一個網路裡的手機看到剪貼簿紀錄。</string>
 </dict>
 </plist>
 PLIST
