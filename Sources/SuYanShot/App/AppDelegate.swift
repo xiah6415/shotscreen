@@ -6,12 +6,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = CaptureCoordinator()
     private let shortcutStore = ShortcutStore()
     private let shortcuts = ShortcutManager()
+    private let clipboard = ClipboardFeature()
     private var menuBarController: MenuBarController?
-    private lazy var settings = SettingsWindowController(store: shortcutStore)
+    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        menuBarController = MenuBarController(coordinator: coordinator) { [weak self] in self?.settings.show() }
+        menuBarController = MenuBarController(
+            coordinator: coordinator,
+            openSettings: { [weak self] in self?.settings.show() },
+            openClipboard: { [weak self] in self?.clipboard.togglePanel() })
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()
@@ -20,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .delayed: self?.coordinator.captureDelayed(.three)
             case .scroll: self?.coordinator.captureScrolling()
             case .allInOne: self?.coordinator.captureAllInOne()
+            case .clipboard: self?.clipboard.togglePanel()
             }
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
@@ -157,8 +162,8 @@ final class CaptureCoordinator {
 
     /// Auto scroll posts scroll-wheel events, which needs Accessibility permission.
     private func setAutoScroll(_ enabled: Bool) {
-        guard !enabled || AutoScroller.isTrusted else {
-            AutoScroller.requestTrust()
+        guard !enabled || PermissionsManager.isAccessibilityTrusted else {
+            PermissionsManager.requestAccessibility()
             let alert = NSAlert()
             alert.messageText = "自動捲動需要「輔助使用」權限"
             alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開素顏 Shot，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"

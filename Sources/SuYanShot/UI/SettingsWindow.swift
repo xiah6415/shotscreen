@@ -5,8 +5,12 @@ import SwiftUI
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let store: ShortcutStore
+    private let clipboard: ClipboardStore
 
-    init(store: ShortcutStore) { self.store = store }
+    init(store: ShortcutStore, clipboard: ClipboardStore) {
+        self.store = store
+        self.clipboard = clipboard
+    }
 
     func show() {
         if window == nil {
@@ -14,7 +18,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             window.title = "素顏 Shot 設定"
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.contentView = NSHostingView(rootView: SettingsView(store: store))
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard))
             window.setContentSize(window.contentView?.fittingSize ?? NSSize(width: 460, height: 320))
             window.center()
             self.window = window
@@ -28,6 +32,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 private struct SettingsView: View {
     @ObservedObject var store: ShortcutStore
+    @ObservedObject var clipboard: ClipboardStore
+    @State private var confirmClear = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -59,6 +65,27 @@ private struct SettingsView: View {
                 Spacer()
                 Button("還原預設") { store.resetToDefaults() }
             }
+
+            Divider()
+
+            Text("剪貼簿").font(.headline)
+            Toggle("記錄複製過的文字、圖片和檔案", isOn: $clipboard.isEnabled)
+            HStack {
+                Picker("最多保留", selection: $clipboard.limit) {
+                    ForEach(ClipboardStore.limitOptions, id: \.self) { Text("\($0) 筆").tag($0) }
+                }
+                .frame(width: 200)
+                Spacer()
+                Button("清除未釘選的紀錄…") { confirmClear = true }
+                    .confirmationDialog("清除所有未釘選的剪貼簿紀錄？", isPresented: $confirmClear) {
+                        Button("清除", role: .destructive) { clipboard.clearUnpinned() }
+                    } message: {
+                        Text("已釘選的會保留。這個動作無法復原。")
+                    }
+            }
+            Text("目前 \(clipboard.items.count) 筆，存在這台 Mac 上，不會上傳。密碼管理工具標為機密的內容不會被記錄。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(20)
         .frame(width: 460)

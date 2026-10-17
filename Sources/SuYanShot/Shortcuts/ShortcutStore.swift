@@ -11,7 +11,8 @@ final class ShortcutStore: ObservableObject {
         .fullScreen: KeyShortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: [.command, .shift], key: "3"),
         .delayed: KeyShortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: [.command, .shift], key: "4"),
         .scroll: KeyShortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: [.command, .shift], key: "6"),
-        .allInOne: KeyShortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: [.command, .shift], key: "5")
+        .allInOne: KeyShortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: [.command, .shift], key: "5"),
+        .clipboard: KeyShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: [.command, .shift], key: "V")
     ]
 
     @Published private(set) var shortcuts: [ShortcutAction: KeyShortcut]

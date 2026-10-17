@@ -1,16 +1,7 @@
 import AppKit
-import ApplicationServices
 
 /// Posts synthetic scroll-wheel events for auto scroll capture. Requires Accessibility permission.
 enum AutoScroller {
-    static var isTrusted: Bool { AXIsProcessTrusted() }
-
-    /// Shows the system Accessibility prompt if the app is not trusted yet.
-    @discardableResult
-    static func requestTrust() -> Bool {
-        AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-    }
-
     /// Scroll events go to the window under the pointer, so park the pointer over the captured region first.
     /// `point` is in global CoreGraphics coordinates (top-left origin of the primary display).
     static func moveCursor(to point: CGPoint) {

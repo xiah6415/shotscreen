@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 
 @MainActor
 enum PermissionsManager {
@@ -19,6 +20,15 @@ enum PermissionsManager {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Needed to post synthetic events (auto scroll, paste from clipboard history).
+    static var isAccessibilityTrusted: Bool { AXIsProcessTrusted() }
+
+    /// Shows the system Accessibility prompt if the app is not trusted yet.
+    @discardableResult
+    static func requestAccessibility() -> Bool {
+        AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
     }
 
     static func openAccessibilitySettings() {

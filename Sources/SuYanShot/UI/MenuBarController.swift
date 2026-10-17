@@ -5,11 +5,13 @@ final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let coordinator: CaptureCoordinator
     private let openSettings: () -> Void
+    private let openClipboard: () -> Void
     private var actionItems: [ShortcutAction: NSMenuItem] = [:]
 
-    init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void) {
+    init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void, openClipboard: @escaping () -> Void) {
         self.coordinator = coordinator
         self.openSettings = openSettings
+        self.openClipboard = openClipboard
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "素顏 Shot")
         let menu = NSMenu()
@@ -31,6 +33,9 @@ final class MenuBarController: NSObject {
         }
         delayed.submenu = delayedMenu
         menu.addItem(delayed)
+        menu.addItem(.separator())
+        actionItems[.clipboard] = item("剪貼簿紀錄", symbol: "doc.on.clipboard", action: #selector(showClipboard))
+        menu.addItem(actionItems[.clipboard]!)
         menu.addItem(.separator())
         menu.addItem(item("打開截圖資料夾", symbol: "folder", action: #selector(openFolder)))
         menu.addItem(item("權限設定…", symbol: "lock.shield", action: #selector(openPermissions)))
@@ -67,6 +72,7 @@ final class MenuBarController: NSObject {
     @objc private func delayCapture(_ sender: NSMenuItem) { if let option = sender.representedObject as? DelayOption { coordinator.captureDelayed(option) } }
     @objc private func openFolder() { coordinator.openCaptureFolder() }
     @objc private func showSettings() { openSettings() }
+    @objc private func showClipboard() { openClipboard() }
     @objc private func openPermissions() { PermissionsManager.openScreenCaptureSettings() }
     @objc private func quit() { NSApp.terminate(nil) }
 }
