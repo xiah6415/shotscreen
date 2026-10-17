@@ -18,7 +18,10 @@ struct ClipboardItem: Codable, Identifiable, Equatable {
     let id: UUID
     var kind: Kind
     var createdAt: Date
+    /// Shown as 常用 (favourite) in the UI.
     var pinned = false
+    /// Custom tags. Optional so history saved before tags existed still decodes.
+    var tagIDs: [UUID]?
     /// Plain text for text kinds.
     var text: String?
     var fileURLs: [URL]?
@@ -30,6 +33,11 @@ struct ClipboardItem: Codable, Identifiable, Equatable {
     /// Identifies identical content so re-copying moves the old entry to the top instead of duplicating it.
     var contentHash: String
 
+    var tags: [UUID] { tagIDs ?? [] }
+
+    /// Favourites and tagged entries are kept when the history is trimmed or cleared.
+    var isKept: Bool { pinned || !tags.isEmpty }
+
     var searchText: String {
         switch kind {
         case .text, .richText: text ?? ""
@@ -37,6 +45,17 @@ struct ClipboardItem: Codable, Identifiable, Equatable {
         case .image: "圖片 image"
         }
     }
+}
+
+/// A user-made label for clipboard entries.
+struct ClipboardTag: Codable, Identifiable, Equatable {
+    static let palette: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen, .systemTeal, .systemBlue, .systemPurple, .systemPink]
+
+    let id: UUID
+    var name: String
+    var colorIndex: Int
+
+    var color: NSColor { Self.palette[colorIndex % Self.palette.count] }
 }
 
 /// What the monitor read from the pasteboard, before it is stored.

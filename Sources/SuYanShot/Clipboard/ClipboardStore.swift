@@ -8,8 +8,9 @@ final class ClipboardStore: ObservableObject {
     static let limitOptions = [50, 100, 200, 500]
 
     @Published private(set) var items: [ClipboardItem] = []
+    @Published private(set) var tags: [ClipboardTag] = []
     @Published var isEnabled: Bool { didSet { userDefaults.set(isEnabled, forKey: Keys.enabled) } }
-    /// Unpinned entries kept; pinned ones never count and are never trimmed.
+    /// Entries kept, not counting favourites and tagged ones, which are never trimmed.
     @Published var limit: Int {
         didSet {
             userDefaults.set(limit, forKey: Keys.limit)
@@ -84,10 +85,60 @@ final class ClipboardStore: ObservableObject {
         save()
     }
 
-    /// Keeps pinned entries.
-    func clearUnpinned() {
-        items.filter { !$0.pinned }.forEach(removePayloads)
-        items.removeAll { !$0.pinned }
+    /// Keeps favourites and tagged entries.
+    func clearUnkept() {
+        items.filter { !$0.isKept }.forEach(removePayloads)
+        items.removeAll { !$0.isKept }
+        save()
+    }
+
+    // MARK: - Tags
+
+    func tag(_ id: UUID) -> ClipboardTag? { tags.first { $0.id == id } }
+
+    /// Creates a tag (or returns the existing one with the same name), optionally adding it to an entry.
+    @discardableResult
+    func createTag(named rawName: String, addingTo itemID: UUID? = nil) -> ClipboardTag? {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        let tag = tags.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+            ?? ClipboardTag(id: UUID(), name: name, colorIndex: tags.count)
+        if !tags.contains(where: { $0.id == tag.id }) {
+            tags.append(tag)
+            saveTags()
+        }
+        if let itemID, let index = items.firstIndex(where: { $0.id == itemID }), !items[index].tags.contains(tag.id) {
+            items[index].tagIDs = items[index].tags + [tag.id]
+            save()
+        }
+        return tag
+    }
+
+    func renameTag(_ id: UUID, to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let index = tags.firstIndex(where: { $0.id == id }) else { return }
+        tags[index].name = name
+        saveTags()
+    }
+
+    /// Removes the tag from every entry; the entries themselves stay.
+    func deleteTag(_ id: UUID) {
+        tags.removeAll { $0.id == id }
+        for index in items.indices where items[index].tags.contains(id) {
+            let remaining = items[index].tags.filter { $0 != id }
+            items[index].tagIDs = remaining.isEmpty ? nil : remaining
+        }
+        saveTags()
+        trim()
+        save()
+    }
+
+    func toggleTag(_ tagID: UUID, on itemID: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let current = items[index].tags
+        let updated = current.contains(tagID) ? current.filter { $0 != tagID } : current + [tagID]
+        items[index].tagIDs = updated.isEmpty ? nil : updated
+        trim()
         save()
     }
 
@@ -123,11 +174,20 @@ final class ClipboardStore: ObservableObject {
     // MARK: - Persistence
 
     private var indexURL: URL { directory.appendingPathComponent("index.json") }
+    private var tagsURL: URL { directory.appendingPathComponent("tags.json") }
 
     private func load() {
+        if let data = try? Data(contentsOf: tagsURL), let decoded = try? JSONDecoder().decode([ClipboardTag].self, from: data) {
+            tags = decoded
+        }
         guard let data = try? Data(contentsOf: indexURL),
               let decoded = try? JSONDecoder().decode([ClipboardItem].self, from: data) else { return }
         items = decoded
+    }
+
+    private func saveTags() {
+        guard let data = try? JSONEncoder().encode(tags) else { return }
+        try? data.write(to: tagsURL, options: .atomic)
     }
 
     private func save() {
@@ -139,7 +199,7 @@ final class ClipboardStore: ObservableObject {
         var unpinned = 0
         var kept: [ClipboardItem] = []
         for item in items {
-            if item.pinned { kept.append(item); continue }
+            if item.isKept { kept.append(item); continue }
             unpinned += 1
             if unpinned <= limit { kept.append(item) } else { removePayloads(for: item) }
         }

@@ -77,5 +77,6 @@ if [[ "${1:-}" == "--install" ]]; then
     rm -rf "$DEST"
     cp -R "$APP" "$DEST"
     echo "✓ Installed $DEST"
-    open "$DEST"
+    # LaunchServices can still report the old instance for a moment (error -600); retry once.
+    open "$DEST" 2>/dev/null || { sleep 1; open "$DEST"; }
 fi

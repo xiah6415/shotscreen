@@ -76,14 +76,14 @@ private struct SettingsView: View {
                 }
                 .frame(width: 200)
                 Spacer()
-                Button("清除未釘選的紀錄…") { confirmClear = true }
-                    .confirmationDialog("清除所有未釘選的剪貼簿紀錄？", isPresented: $confirmClear) {
-                        Button("清除", role: .destructive) { clipboard.clearUnpinned() }
+                Button("清除一般紀錄…") { confirmClear = true }
+                    .confirmationDialog("清除所有沒加入常用、也沒有標籤的紀錄？", isPresented: $confirmClear) {
+                        Button("清除", role: .destructive) { clipboard.clearUnkept() }
                     } message: {
-                        Text("已釘選的會保留。這個動作無法復原。")
+                        Text("常用和有標籤的會保留。這個動作無法復原。")
                     }
             }
-            Text("目前 \(clipboard.items.count) 筆，存在這台 Mac 上，不會上傳。密碼管理工具標為機密的內容不會被記錄。")
+            Text("目前 \(clipboard.items.count) 筆，存在這台 Mac 上，不會上傳。常用和有標籤的紀錄不會被自動清掉。密碼管理工具標為機密的內容不會被記錄。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
