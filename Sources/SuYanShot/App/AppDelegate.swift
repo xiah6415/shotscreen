@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcuts = ShortcutManager()
     private let clipboard = ClipboardFeature()
     private var menuBarController: MenuBarController?
-    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store)
+    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] in self?.settings.show() },
             openClipboard: { [weak self] in self?.clipboard.togglePanel() },
             openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() })
+        coordinator.onRecordingChange = { [weak self] recording in self?.menuBarController?.setRecording(recording) }
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .scroll: self?.coordinator.captureScrolling()
             case .allInOne: self?.coordinator.captureAllInOne()
             case .clipboard: self?.clipboard.togglePanel()
+            case .record: self?.coordinator.recordRegion()
             }
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
@@ -55,6 +57,13 @@ final class CaptureCoordinator {
     private lazy var scrollService: ScrollCaptureService = ManualScrollCaptureService(captureService: captureService)
     private let scrollHUD = ScrollCaptureHUD()
     private var isScrollCapturing = false
+    let recordingSettings = RecordingSettings()
+    private var recorder: ScreenRecorder?
+    private let recordingHUD = RecordingHUD()
+    private lazy var recordingPreview = RecordingPreviewController()
+    /// Called with true when a recording starts and false when it ends.
+    var onRecordingChange: ((Bool) -> Void)?
+    var isRecording: Bool { recorder != nil }
     private let exporter = ImageExporter()
     private lazy var thumbnail = FloatingThumbnailController(exporter: exporter) { [weak self] in self?.annotate($0) }
     private var editors: [AnnotationEditorController] = []
@@ -78,6 +87,7 @@ final class CaptureCoordinator {
             case let .scroll(selection): self.startScrolling(selection)
             case .window: self.captureWindow()
             case let .fullScreen(screen): self.captureFullScreen(on: screen)
+            case let .record(selection): self.startRecording(on: selection.screen, selection: selection)
             }
         }
     }
@@ -202,6 +212,81 @@ final class CaptureCoordinator {
         editor.onClose = { [weak self] closed in self?.editors.removeAll { $0 === closed } }
         editors.append(editor)
         editor.show()
+    }
+
+    // MARK: - Recording
+
+    /// Select a region and record it; while recording, stops instead.
+    func recordRegion() {
+        if isRecording { stopRecording(); return }
+        guard ensurePermission() else { return }
+        regionSelector.begin { [weak self] result in
+            guard let self, case let .success(selection) = result else { return }
+            self.startRecording(on: selection.screen, selection: selection)
+        }
+    }
+
+    /// Records the screen under the pointer; while recording, stops instead.
+    func recordFullScreen() {
+        if isRecording { stopRecording(); return }
+        guard ensurePermission(), let screen = NSScreen.underMouse else { return }
+        startRecording(on: screen, selection: nil)
+    }
+
+    private func startRecording(on screen: NSScreen, selection: RegionSelection?) {
+        guard !isRecording else { return }
+        let begin = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in await self.beginRecording(on: screen, selection: selection) }
+        }
+        if recordingSettings.countdown { countdown.start(seconds: 3, completion: begin) } else { begin() }
+    }
+
+    private func beginRecording(on screen: NSScreen, selection: RegionSelection?) async {
+        do {
+            let display = try await display(for: screen)
+            let filter = try await captureService.displayFilter(for: display)
+            let scale = screen.backingScaleFactor
+            let pixelSize = selection.map { $0.sourceRectPixels.size } ?? CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
+            let recorder = ScreenRecorder()
+            recorder.onFailure = { [weak self] error in
+                self?.abortRecording()
+                self?.present(error)
+            }
+            try await recorder.start(filter: filter, sourceRect: selection?.sourceRectPixels, pixelSize: pixelSize,
+                                     options: recordingSettings.options, to: try exporter.recordingURL())
+            self.recorder = recorder
+            let region = selection.map { $0.rectInScreenPoints.offsetBy(dx: $0.screen.frame.minX, dy: $0.screen.frame.minY) }
+            recordingHUD.show(region: region, on: screen,
+                              onPause: { [weak recorder] paused in if paused { recorder?.pause() } else { recorder?.resume() } },
+                              onStop: { [weak self] in self?.stopRecording() },
+                              onCancel: { [weak self] in self?.cancelRecording() })
+            onRecordingChange?(true)
+        } catch {
+            present(error)
+        }
+    }
+
+    func stopRecording() {
+        guard let recorder else { return }
+        self.recorder = nil
+        recordingHUD.hide()
+        onRecordingChange?(false)
+        Task { @MainActor in
+            do { recordingPreview.show(try await recorder.stop()) } catch { present(error) }
+        }
+    }
+
+    private func cancelRecording() {
+        guard let recorder else { return }
+        abortRecording()
+        Task { await recorder.cancel() }
+    }
+
+    private func abortRecording() {
+        recorder = nil
+        recordingHUD.hide()
+        onRecordingChange?(false)
     }
 
     func openCaptureFolder() { NSWorkspace.shared.open(exporter.defaultDirectory) }

@@ -26,7 +26,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - Avoid third-party packages and premature abstractions.
 - Build after each cohesive change and add unit tests for deterministic logic.
 - Record material architecture decisions and handoff state in `memory.md`.
-- Do not modify unrelated files or implement OCR, cloud, accounts, recording, or GIFs in this phase. (The annotation editor was added at the user's explicit request on 2026-10-15.)
+- Do not modify unrelated files or implement OCR, cloud, or accounts in this phase. (The annotation editor, screen recording and GIF export were added at the user's explicit request.)
 
 ## Build and test
 From repository root:

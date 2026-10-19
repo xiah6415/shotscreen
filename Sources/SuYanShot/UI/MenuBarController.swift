@@ -8,6 +8,7 @@ final class MenuBarController: NSObject {
     private let openClipboard: () -> Void
     private let openPhoneShare: () -> Void
     private var actionItems: [ShortcutAction: NSMenuItem] = [:]
+    private var stopRecordingItem: NSMenuItem?
 
     init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void, openClipboard: @escaping () -> Void,
          openPhoneShare: @escaping () -> Void) {
@@ -18,6 +19,10 @@ final class MenuBarController: NSObject {
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "素顏 Shot")
         let menu = NSMenu()
+        let stop = item("停止錄影", symbol: "stop.circle.fill", action: #selector(stopRecording))
+        stop.isHidden = true
+        menu.addItem(stop)
+        stopRecordingItem = stop
         actionItems[.allInOne] = item("All-in-One", symbol: "viewfinder", action: #selector(allInOneCapture))
         menu.addItem(actionItems[.allInOne]!)
         menu.addItem(.separator())
@@ -36,6 +41,13 @@ final class MenuBarController: NSObject {
         }
         delayed.submenu = delayedMenu
         menu.addItem(delayed)
+        let record = item("錄影", symbol: "record.circle", action: nil)
+        let recordMenu = NSMenu(title: "錄影")
+        actionItems[.record] = item("框選範圍錄影", symbol: "rectangle.dashed", action: #selector(recordRegion))
+        recordMenu.addItem(actionItems[.record]!)
+        recordMenu.addItem(item("全螢幕錄影", symbol: "display", action: #selector(recordFullScreen)))
+        record.submenu = recordMenu
+        menu.addItem(record)
         menu.addItem(.separator())
         actionItems[.clipboard] = item("剪貼簿紀錄", symbol: "doc.on.clipboard", action: #selector(showClipboard))
         menu.addItem(actionItems[.clipboard]!)
@@ -51,6 +63,13 @@ final class MenuBarController: NSObject {
         quit.keyEquivalentModifierMask = .command
         menu.addItem(quit)
         statusItem.menu = menu
+    }
+
+    /// Red menu-bar icon and a 停止錄影 item while recording.
+    func setRecording(_ recording: Bool) {
+        statusItem.button?.image = NSImage(systemSymbolName: recording ? "record.circle.fill" : "camera.viewfinder", accessibilityDescription: "素顏 Shot")
+        statusItem.button?.contentTintColor = recording ? .systemRed : nil
+        stopRecordingItem?.isHidden = !recording
     }
 
     /// Shows the user's global shortcuts next to the matching menu items.
@@ -73,6 +92,9 @@ final class MenuBarController: NSObject {
     @objc private func windowCapture() { coordinator.captureWindow() }
     @objc private func fullScreenCapture() { coordinator.captureFullScreen() }
     @objc private func scrollCapture() { coordinator.captureScrolling() }
+    @objc private func recordRegion() { coordinator.recordRegion() }
+    @objc private func recordFullScreen() { coordinator.recordFullScreen() }
+    @objc private func stopRecording() { coordinator.stopRecording() }
     @objc private func delayCapture(_ sender: NSMenuItem) { if let option = sender.representedObject as? DelayOption { coordinator.captureDelayed(option) } }
     @objc private func openFolder() { coordinator.openCaptureFolder() }
     @objc private func showSettings() { openSettings() }

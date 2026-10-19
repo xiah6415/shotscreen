@@ -15,6 +15,13 @@ struct ImageExporter {
         return "Screenshot \(formatter.string(from: date)).png"
     }
 
+    /// Desktop (or the default directory) path for a new screen recording, named like screenshots.
+    func recordingURL(at date: Date = .now) throws -> URL {
+        try FileManager.default.createDirectory(at: defaultDirectory, withIntermediateDirectories: true)
+        let name = defaultFilename(at: date).replacingOccurrences(of: "Screenshot", with: "Recording").replacingOccurrences(of: ".png", with: ".mp4")
+        return defaultDirectory.appendingPathComponent(name)
+    }
+
     func exportPNG(_ image: CGImage, to directory: URL? = nil, filename: String? = nil, date: Date = .now) throws -> URL {
         let targetDirectory = directory ?? defaultDirectory
         try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)

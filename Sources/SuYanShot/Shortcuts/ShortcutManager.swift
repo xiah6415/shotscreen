@@ -1,7 +1,7 @@
 import Carbon.HIToolbox
 
 enum ShortcutAction: Int, CaseIterable {
-    case region = 1, window, fullScreen, delayed, scroll, allInOne, clipboard
+    case region = 1, window, fullScreen, delayed, scroll, allInOne, clipboard, record
 
     var title: String {
         switch self {
@@ -12,6 +12,7 @@ enum ShortcutAction: Int, CaseIterable {
         case .scroll: "捲動截圖"
         case .allInOne: "All-in-One"
         case .clipboard: "剪貼簿紀錄"
+        case .record: "框選錄影（錄影中按一下停止）"
         }
     }
 }

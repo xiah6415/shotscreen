@@ -5,6 +5,7 @@ import SwiftUI
 enum AllInOneAction {
     case capture(RegionSelection)
     case scroll(RegionSelection)
+    case record(RegionSelection)
     case window
     case fullScreen(NSScreen)
 }
@@ -71,7 +72,7 @@ private final class AllInOneView: NSView {
     private var pointer: CGPoint?
     private let model = AllInOneToolbarModel()
     private var toolbar: NSHostingView<AllInOneToolbar>!
-    private let toolbarSize = NSSize(width: 440, height: 56)
+    private let toolbarSize = NSSize(width: 510, height: 56)
     private let handleSize: CGFloat = 8
 
     init(screen: NSScreen, selector: AllInOneSelector) {
@@ -82,6 +83,7 @@ private final class AllInOneView: NSView {
             model: model,
             onCapture: { [weak self] in self?.perform(.capture) },
             onScroll: { [weak self] in self?.perform(.scroll) },
+            onRecord: { [weak self] in self?.perform(.record) },
             onWindow: { [weak self] in self?.selector?.finish(.window) },
             onFullScreen: { [weak self] in self.map { $0.selector?.finish(.fullScreen($0.screen)) } },
             onCancel: { [weak self] in self?.selector?.finish(nil) }
@@ -109,12 +111,16 @@ private final class AllInOneView: NSView {
         drag = nil
     }
 
-    private enum Action { case capture, scroll }
+    private enum Action { case capture, scroll, record }
 
     private func perform(_ action: Action) {
         guard let selection, selection.width >= 2, selection.height >= 2 else { return }
         let region = RegionSelection(screen: screen, rectInScreenPoints: selection.integral)
-        selector?.finish(action == .capture ? .capture(region) : .scroll(region))
+        switch action {
+        case .capture: selector?.finish(.capture(region))
+        case .scroll: selector?.finish(.scroll(region))
+        case .record: selector?.finish(.record(region))
+        }
     }
 
     private func selectionDidChange() {
@@ -296,6 +302,7 @@ private final class AllInOneView: NSView {
         case kVK_Escape: selector?.finish(nil)
         case kVK_Return, kVK_ANSI_KeypadEnter: perform(.capture)
         case kVK_ANSI_S: perform(.scroll)
+        case kVK_ANSI_R: perform(.record)
         default: super.keyDown(with: event)
         }
     }
@@ -305,6 +312,7 @@ private struct AllInOneToolbar: View {
     @ObservedObject var model: AllInOneToolbarModel
     let onCapture: () -> Void
     let onScroll: () -> Void
+    let onRecord: () -> Void
     let onWindow: () -> Void
     let onFullScreen: () -> Void
     let onCancel: () -> Void
@@ -315,6 +323,8 @@ private struct AllInOneToolbar: View {
                 .disabled(!model.hasSelection)
             ToolbarAction(title: "捲動截圖", symbol: "scroll", help: "開始捲動截圖（S）", action: onScroll)
                 .disabled(!model.hasSelection)
+            ToolbarAction(title: "錄影", symbol: "record.circle", help: "錄下選取範圍（R）", action: onRecord)
+                .disabled(!model.hasSelection)
             Divider().frame(height: 30).padding(.horizontal, 4)
             ToolbarAction(title: "視窗", symbol: "macwindow", help: "改選一個視窗", action: onWindow)
             ToolbarAction(title: "全螢幕", symbol: "display", help: "截取這個螢幕", action: onFullScreen)
@@ -322,7 +332,7 @@ private struct AllInOneToolbar: View {
             ToolbarAction(title: "取消", symbol: "xmark", help: "取消（Esc）", action: onCancel)
         }
         .padding(.horizontal, 8)
-        .frame(width: 440, height: 56)
+        .frame(width: 510, height: 56)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

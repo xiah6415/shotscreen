@@ -11,13 +11,7 @@ final class ScreenCaptureService {
             throw CaptureError.permissionDenied
         }
 
-        // Leave out our own overlays, handles, HUD and preview cards, even if they are still being removed from the screen.
-        let filter: SCContentFilter
-        if let own = try await ownApp() {
-            filter = SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
-        } else {
-            filter = SCContentFilter(display: display, excludingWindows: [])
-        }
+        let filter = try await displayFilter(for: display)
         let configuration = SCStreamConfiguration()
         configuration.showsCursor = false
         if let sourceRect {
@@ -26,6 +20,15 @@ final class ScreenCaptureService {
             configuration.height = max(1, Int(sourceRect.height))
         }
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    /// The whole display minus this app's own overlays, handles, HUDs and preview cards,
+    /// even while they are still being removed from the screen. Shared by screenshots and recordings.
+    func displayFilter(for display: SCDisplay) async throws -> SCContentFilter {
+        if let own = try await ownApp() {
+            return SCContentFilter(display: display, excludingApplications: [own], exceptingWindows: [])
+        }
+        return SCContentFilter(display: display, excludingWindows: [])
     }
 
     private func ownApp() async throws -> SCRunningApplication? {

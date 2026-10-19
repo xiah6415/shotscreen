@@ -6,10 +6,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let store: ShortcutStore
     private let clipboard: ClipboardStore
+    private let recording: RecordingSettings
 
-    init(store: ShortcutStore, clipboard: ClipboardStore) {
+    init(store: ShortcutStore, clipboard: ClipboardStore, recording: RecordingSettings) {
         self.store = store
         self.clipboard = clipboard
+        self.recording = recording
     }
 
     func show() {
@@ -18,7 +20,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             window.title = "素顏 Shot 設定"
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard))
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard, recording: recording))
             window.setContentSize(window.contentView?.fittingSize ?? NSSize(width: 460, height: 320))
             window.center()
             self.window = window
@@ -33,6 +35,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 private struct SettingsView: View {
     @ObservedObject var store: ShortcutStore
     @ObservedObject var clipboard: ClipboardStore
+    @ObservedObject var recording: RecordingSettings
     @State private var confirmClear = false
 
     var body: some View {
@@ -84,6 +87,27 @@ private struct SettingsView: View {
                     }
             }
             Text("目前 \(clipboard.items.count) 筆，存在這台 Mac 上，不會上傳。常用和有標籤的紀錄不會被自動清掉。密碼管理工具標為機密的內容不會被記錄。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Text("錄影").font(.headline)
+            HStack(spacing: 20) {
+                Picker("畫面更新率", selection: $recording.frameRate) {
+                    ForEach(RecordingSettings.frameRates, id: \.self) { Text("\($0) fps").tag($0) }
+                }
+                .frame(width: 200)
+                Toggle("開始前倒數 3 秒", isOn: $recording.countdown)
+            }
+            HStack(spacing: 20) {
+                Toggle("錄進游標", isOn: $recording.showsCursor)
+                Toggle("錄系統聲音", isOn: $recording.systemAudio)
+                Toggle("錄麥克風", isOn: $recording.microphone)
+                    .disabled(!RecordingSettings.microphoneSupported)
+                    .help(RecordingSettings.microphoneSupported ? "第一次會請你允許使用麥克風" : "需要 macOS 15 以上")
+            }
+            Text("影片存成 MP4 放在桌面，錄完可以在預覽卡片上轉成 GIF。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

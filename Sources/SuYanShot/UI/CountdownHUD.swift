@@ -7,9 +7,11 @@ final class CountdownHUD {
     private var panel: NSPanel?
     private var timer: Timer?
     private let model = CountdownModel()
+    private var onCancel: (() -> Void)?
 
-    func start(seconds: Int, completion: @escaping () -> Void) {
+    func start(seconds: Int, onCancel: (() -> Void)? = nil, completion: @escaping () -> Void) {
         cancel()
+        self.onCancel = onCancel
         model.remaining = seconds
         let size = NSSize(width: 150, height: 150)
         let visible = NSScreen.underMouse?.visibleFrame ?? CGRect(x: 0, y: 0, width: 800, height: 600)
@@ -20,7 +22,11 @@ final class CountdownHUD {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: CountdownView(model: model) { [weak self] in self?.cancel() })
+        panel.contentView = NSHostingView(rootView: CountdownView(model: model) { [weak self] in
+            let onCancel = self?.onCancel
+            self?.cancel()
+            onCancel?()
+        })
         panel.orderFrontRegardless()
         self.panel = panel
 
