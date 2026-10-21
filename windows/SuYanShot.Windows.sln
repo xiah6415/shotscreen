@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{2D49206D-83A7-4984-91ED-71E7355ACC73}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SuYanShot", "src\SuYanShot\SuYanShot.csproj", "{EA3807EE-F455-47C0-A4A4-82726D287A43}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{85B7129E-3803-4377-9E4B-37D08F13D864}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SuYanShot.Tests", "tests\SuYanShot.Tests\SuYanShot.Tests.csproj", "{8A929998-C9FD-4C4C-B456-EFCA17FE8961}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EA3807EE-F455-47C0-A4A4-82726D287A43}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA3807EE-F455-47C0-A4A4-82726D287A43}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA3807EE-F455-47C0-A4A4-82726D287A43}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA3807EE-F455-47C0-A4A4-82726D287A43}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A929998-C9FD-4C4C-B456-EFCA17FE8961}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A929998-C9FD-4C4C-B456-EFCA17FE8961}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A929998-C9FD-4C4C-B456-EFCA17FE8961}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A929998-C9FD-4C4C-B456-EFCA17FE8961}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{EA3807EE-F455-47C0-A4A4-82726D287A43} = {2D49206D-83A7-4984-91ED-71E7355ACC73}
+		{8A929998-C9FD-4C4C-B456-EFCA17FE8961} = {85B7129E-3803-4377-9E4B-37D08F13D864}
+	EndGlobalSection
+EndGlobal

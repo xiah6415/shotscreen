@@ -43,6 +43,9 @@ For an app bundle / signed distribution, create an Xcode project from the packag
 - **Screen Recording**: required by ScreenCaptureKit captures; prompted/opened through System Settings.
 - **Accessibility**: required for global hotkeys using Carbon event handlers. Grant in Privacy & Security if macOS requests it.
 
+## Windows port
+`windows/` holds the Windows app (C# / .NET 8 WinForms, `dotnet build` / `dotnet test` from that folder). It mirrors this structure; see `windows/README.md` for its decisions, status and what is not yet ported. Changes to one platform do not require touching the other.
+
 ## Agent handoff rules
 1. Read `memory.md` and `HANDOFF TO CLAUDE CODE.md` first.
 2. Preserve the `ScrollCaptureService` boundary. Scrolling is manual by default; auto scroll (added at the user's request on 2026-10-15) only runs when the user turns it on and must keep pausing at checkpoints to ask before continuing.

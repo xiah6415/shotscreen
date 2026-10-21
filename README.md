@@ -2,6 +2,8 @@
 
 A private, native macOS screenshot utility for the common capture workflow: no subscription, cloud, account, or third-party framework.
 
+A native Windows port lives in [`windows/`](windows/README.md) (C# / .NET 8). Both apps share this repository so features can be kept in step.
+
 ## Requirements
 
 - macOS 14 Sonoma or later
