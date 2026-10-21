@@ -40,18 +40,17 @@ hover for 複製 / 儲存 / 關閉, drag it into another app to drop a `.png`, d
 The card closes after 8 s unless hovered. Saved files go to the Desktop as `Screenshot 2026-10-21 at 14.03.07.png`, the same
 naming as macOS.
 
-Tray menu also has 打開截圖資料夾, 編輯快捷鍵… and 登入時啟動 (adds/removes `HKCU\...\Run\SuYanShot`).
+Tray menu also has 打開截圖資料夾 and 設定….
 
-### Shortcuts
+### 設定
 
-`%APPDATA%\SuYanShot\shortcuts.json`, opened by 編輯快捷鍵…, is reloaded automatically when saved:
+The settings window (tray menu → 設定…) has a recorder per action: click it, press the new combination. Esc cancels,
+Backspace clears. A shortcut needs Ctrl, Alt or Win plus a letter, digit or F-key; F1–F24 and `PrintScreen` can stand alone.
+A combination already used by another action moves to the new one. Changes apply immediately; combinations another program
+already owns are marked 已被其他程式使用. 還原預設 restores Ctrl+Shift+1–4. 登入 Windows 時自動啟動 adds/removes
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\SuYanShot`.
 
-```json
-{ "Region": "Ctrl+Shift+1", "Window": "Ctrl+Shift+2", "FullScreen": "Ctrl+Shift+3", "Delayed": "Ctrl+Shift+4" }
-```
-
-Modifiers: `Ctrl`, `Alt`, `Shift`, `Win`. Keys: `A`–`Z`, `0`–`9`, `F1`–`F24`, `PrintScreen`. A shortcut needs Ctrl, Alt or Win
-unless it is a function key; `""` disables an action. If another program already owns a combination, a tray notification lists it.
+Shortcuts are stored in `%APPDATA%\SuYanShot\shortcuts.json` (`{ "Region": "Ctrl+Shift+1", ... }`, `""` = cleared).
 Using bare `PrintScreen` needs Windows' own "Use the Print screen key to open screen capture" setting turned off.
 
 ## Architecture
@@ -64,8 +63,9 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - `Capture/SelectionOverlay.cs` — one overlay per monitor for region and window selection.
 - `Capture/WindowList.cs` — visible top-level windows in z-order.
 - `Shortcuts/` — `RegisterHotKey` wrapper, shortcut parsing and the JSON store.
+- `App/StartupRegistration.cs` — 登入時啟動 (per-user Run key).
 - `Storage/` — `ImageExporter` (naming / PNG policy) and clipboard.
-- `UI/` — preview card and countdown HUD.
+- `UI/` — preview card, countdown HUD, settings window and its shortcut recorder.
 - `Native/NativeMethods.cs` — all Win32 interop.
 
 ### Decisions
@@ -83,9 +83,10 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 19 tests pass (naming, no-overwrite export, shortcut parsing/store,
+- `dotnet build`: passes with no warnings. `dotnet test`: 21 tests pass (naming, no-overwrite export, shortcut parsing/store incl. reassigning and clearing,
   frozen-desktop cropping with negative virtual-screen origins, blank detection).
 - The app was launched and stayed running, and it wrote the default `shortcuts.json`.
+- Settings window: built and launched, not yet tried by the user.
 - Not yet checked interactively: the region / window / full-screen / delayed flows, preview card, drag-out, and mixed-DPI
   multi-monitor behaviour.
 
@@ -93,4 +94,4 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 All-in-One, scroll capture (the stitching algorithm in `Capture/ScrollStitcher.swift` should be ported as-is and tested against
 the same synthetic cases described in `memory.md`), annotation editor, screen recording / GIF, clipboard history, phone sharing,
-and a settings window (shortcuts are a JSON file for now).
+and the 剪貼簿 / 錄影 sections of the settings window.

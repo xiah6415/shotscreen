@@ -44,6 +44,7 @@ public sealed class KeyShortcutTests
     [InlineData("Win+Shift+F5", Keys.F5, false, false, true, true)]
     [InlineData("F9", Keys.F9, false, false, false, false)]
     [InlineData("Alt+PrintScreen", Keys.PrintScreen, false, true, false, false)]
+    [InlineData("PrintScreen", Keys.PrintScreen, false, false, false, false)]
     public void Parses(string text, Keys key, bool control, bool alt, bool shift, bool win)
     {
         Assert.True(KeyShortcut.TryParse(text, out var shortcut));
@@ -89,6 +90,26 @@ public sealed class ShortcutStoreTests : IDisposable
         Assert.Equal("Ctrl+Alt+W", shortcuts[ShortcutAction.Window].ToString());
         Assert.False(shortcuts.ContainsKey(ShortcutAction.FullScreen));
         Assert.False(shortcuts.ContainsKey(ShortcutAction.Delayed));
+    }
+
+    [Fact]
+    public void SetTakesTheCombinationFromAnotherActionAndClearingSticks()
+    {
+        var store = new ShortcutStore(file);
+        KeyShortcut.TryParse("Ctrl+Shift+2", out var windowDefault);
+        var shortcuts = store.Set(ShortcutAction.Region, windowDefault);
+        Assert.Equal(windowDefault, shortcuts[ShortcutAction.Region]);
+        Assert.False(shortcuts.ContainsKey(ShortcutAction.Window));
+
+        // Reloading must not bring back the Window default: cleared actions are saved as "".
+        var reloaded = new ShortcutStore(file).Load();
+        Assert.False(reloaded.ContainsKey(ShortcutAction.Window));
+
+        store.Set(ShortcutAction.Delayed, null);
+        Assert.False(new ShortcutStore(file).Load().ContainsKey(ShortcutAction.Delayed));
+
+        Assert.Equal(4, store.ResetToDefaults().Count);
+        Assert.False(File.Exists(file));
     }
 
     [Fact]

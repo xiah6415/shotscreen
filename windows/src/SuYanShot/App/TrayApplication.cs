@@ -1,26 +1,22 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
-using Microsoft.Win32;
 using SuYanShot.Capture;
 using SuYanShot.Shortcuts;
 using SuYanShot.Storage;
+using SuYanShot.UI;
 
 namespace SuYanShot.App;
 
 /// The Windows counterpart of the macOS menu-bar app: a notification-area icon with the same Chinese menu.
 internal sealed class TrayApplication : ApplicationContext
 {
-    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunValue = "SuYanShot";
-
     private readonly ImageExporter exporter = new();
     private readonly CaptureCoordinator coordinator;
     private readonly ShortcutStore shortcutStore = new();
     private readonly HotkeyManager hotkeys = new();
     private readonly NotifyIcon trayIcon;
     private readonly Dictionary<ShortcutAction, ToolStripMenuItem> actionItems = new();
-    private readonly FileSystemWatcher? shortcutWatcher;
-    private readonly ToolStripMenuItem startAtLogin;
+    private SettingsWindow? settingsWindow;
 
     public TrayApplication()
     {
@@ -42,10 +38,8 @@ internal sealed class TrayApplication : ApplicationContext
         }
         menu.Items.Add(delayed);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Item("打開截圖資料夾", () => Open(exporter.DefaultDirectory)));
-        menu.Items.Add(Item("編輯快捷鍵…", EditShortcuts));
-        startAtLogin = new ToolStripMenuItem("登入時啟動", null, (_, _) => ToggleStartAtLogin()) { Checked = StartsAtLogin() };
-        menu.Items.Add(startAtLogin);
+        menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
+        menu.Items.Add(Item("設定…", OpenSettings));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("結束 素顏 Shot", ExitThread));
 
@@ -64,9 +58,9 @@ internal sealed class TrayApplication : ApplicationContext
                 ?.Invoke(trayIcon, null);
         };
 
-        shortcutStore.EnsureFileExists();
-        ApplyShortcuts(showWarnings: true);
-        shortcutWatcher = WatchShortcutFile();
+        var failed = ApplyShortcuts(shortcutStore.Load());
+        if (failed.Count > 0)
+            trayIcon.ShowBalloonTip(5000, "素顏 Shot", "有快捷鍵已被其他程式使用，可以在「設定…」換一組。", ToolTipIcon.Warning);
     }
 
     private static ToolStripMenuItem Item(string title, Action action) => new(title, null, (_, _) => action());
@@ -83,55 +77,26 @@ internal sealed class TrayApplication : ApplicationContext
         };
     }
 
-    private void ApplyShortcuts(bool showWarnings)
+    /// Registers the shortcuts, shows them in the menu, and returns the actions Windows refused.
+    private IReadOnlySet<ShortcutAction> ApplyShortcuts(IReadOnlyDictionary<ShortcutAction, KeyShortcut> shortcuts)
     {
-        var shortcuts = shortcutStore.Load();
-        var failed = hotkeys.Apply(shortcuts);
+        var failed = hotkeys.Apply(shortcuts).Select(f => f.Action).ToHashSet();
         foreach (var (action, item) in actionItems)
             item.ShortcutKeyDisplayString = shortcuts.TryGetValue(action, out var shortcut) ? shortcut.ToString() : null;
-        if (showWarnings && failed.Count > 0)
+        return failed;
+    }
+
+    private void OpenSettings()
+    {
+        if (settingsWindow is { IsDisposed: false })
         {
-            var list = string.Join("、", failed.Select(f => f.Shortcut.ToString()));
-            trayIcon.ShowBalloonTip(5000, "素顏 Shot", $"這些快捷鍵已被其他程式使用：{list}。可以在「編輯快捷鍵…」換一組。", ToolTipIcon.Warning);
+            settingsWindow.Activate();
+            return;
         }
-    }
-
-    private FileSystemWatcher? WatchShortcutFile()
-    {
-        var folder = Path.GetDirectoryName(shortcutStore.FilePath);
-        if (folder == null || !Directory.Exists(folder)) return null;
-        var watcher = new FileSystemWatcher(folder, Path.GetFileName(shortcutStore.FilePath))
-        {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
-            EnableRaisingEvents = true,
-        };
-        var ui = SynchronizationContext.Current;
-        // Editors often write twice; debounce so the hotkeys are re-registered once.
-        System.Threading.Timer? debounce = null;
-        watcher.Changed += (_, _) =>
-        {
-            debounce?.Dispose();
-            debounce = new System.Threading.Timer(_ => ui?.Post(_ => ApplyShortcuts(showWarnings: true), null), null, 400, Timeout.Infinite);
-        };
-        return watcher;
-    }
-
-    private void EditShortcuts() => Process.Start(new ProcessStartInfo("notepad.exe", $"\"{shortcutStore.FilePath}\""));
-
-    private static void Open(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-
-    private static bool StartsAtLogin()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue(RunValue) is string;
-    }
-
-    private void ToggleStartAtLogin()
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-        if (StartsAtLogin()) key.DeleteValue(RunValue, throwOnMissingValue: false);
-        else key.SetValue(RunValue, $"\"{Environment.ProcessPath}\"");
-        startAtLogin.Checked = StartsAtLogin();
+        settingsWindow = new SettingsWindow(shortcutStore, ApplyShortcuts);
+        settingsWindow.FormClosed += (_, _) => settingsWindow = null;
+        settingsWindow.Show();
+        settingsWindow.Activate();
     }
 
     /// A viewfinder glyph drawn at runtime, so the project needs no binary icon file yet.
@@ -159,7 +124,7 @@ internal sealed class TrayApplication : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        shortcutWatcher?.Dispose();
+        settingsWindow?.Close();
         hotkeys.Dispose();
         trayIcon.Visible = false;
         trayIcon.Dispose();

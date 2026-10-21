@@ -16,6 +16,12 @@ internal sealed class ShortcutStore
         [ShortcutAction.Delayed] = "Ctrl+Shift+4",
     };
 
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     public string FilePath { get; }
 
     public ShortcutStore(string? filePath = null)
@@ -36,13 +42,38 @@ internal sealed class ShortcutStore
         return result;
     }
 
-    /// Writes the defaults on first run so the user has a file to edit.
-    public void EnsureFileExists()
+    /// Assigns (or with null, clears) one action and saves. A combination already used by another action is taken from it,
+    /// like the macOS settings window.
+    public Dictionary<ShortcutAction, KeyShortcut> Set(ShortcutAction action, KeyShortcut? shortcut)
     {
-        if (File.Exists(FilePath)) return;
+        var shortcuts = Load();
+        if (shortcut is KeyShortcut value)
+        {
+            foreach (var other in shortcuts.Where(pair => pair.Value == value && pair.Key != action).Select(pair => pair.Key).ToList())
+                shortcuts.Remove(other);
+            shortcuts[action] = value;
+        }
+        else
+        {
+            shortcuts.Remove(action);
+        }
+        Save(shortcuts);
+        return shortcuts;
+    }
+
+    public Dictionary<ShortcutAction, KeyShortcut> ResetToDefaults()
+    {
+        if (File.Exists(FilePath)) File.Delete(FilePath);
+        return Load();
+    }
+
+    /// Writes every action, so cleared ones are stored as "" rather than falling back to their default.
+    public void Save(IReadOnlyDictionary<ShortcutAction, KeyShortcut> shortcuts)
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        var defaults = Defaults.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(defaults, new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        var data = Enum.GetValues<ShortcutAction>()
+            .ToDictionary(action => action.ToString(), action => shortcuts.TryGetValue(action, out var s) ? s.ToString() : "");
+        File.WriteAllText(FilePath, JsonSerializer.Serialize(data, WriteOptions));
     }
 
     private Dictionary<string, string> ReadFile()

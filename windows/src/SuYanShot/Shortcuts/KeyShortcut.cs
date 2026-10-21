@@ -10,7 +10,7 @@ internal enum ShortcutAction
     Delayed,
 }
 
-/// A global hotkey such as "Ctrl+Shift+1". Requires Ctrl, Alt or Win unless the key is F1–F24 (same rule as macOS).
+/// A global hotkey such as "Ctrl+Shift+1". Requires Ctrl, Alt or Win unless the key is F1–F24 or PrintScreen (macOS has the same rule for F-keys).
 internal readonly record struct KeyShortcut(Keys Key, bool Control, bool Alt, bool Shift, bool Win)
 {
     public uint Modifiers =>
@@ -49,9 +49,18 @@ internal readonly record struct KeyShortcut(Keys Key, bool Control, bool Alt, bo
             }
         }
         if (key is not Keys k) return false;
-        var isFunctionKey = k is >= Keys.F1 and <= Keys.F24;
-        if (!isFunctionKey && !control && !alt && !win) return false;
-        shortcut = new KeyShortcut(k, control, alt, shift, win);
+        return TryCreate(k, control, alt, shift, win, out shortcut);
+    }
+
+    /// Validates a combination pressed in the settings recorder: a supported key, plus Ctrl, Alt or Win unless it is F1–F24 or PrintScreen.
+    public static bool TryCreate(Keys key, bool control, bool alt, bool shift, bool win, out KeyShortcut shortcut)
+    {
+        shortcut = default;
+        var supported = key is >= Keys.A and <= Keys.Z or >= Keys.D0 and <= Keys.D9 or >= Keys.F1 and <= Keys.F24 or Keys.PrintScreen;
+        if (!supported) return false;
+        var standsAlone = key is >= Keys.F1 and <= Keys.F24 or Keys.PrintScreen;
+        if (!standsAlone && !control && !alt && !win) return false;
+        shortcut = new KeyShortcut(key, control, alt, shift, win);
         return true;
     }
 
