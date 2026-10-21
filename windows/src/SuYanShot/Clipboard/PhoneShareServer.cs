@@ -47,15 +47,15 @@ internal sealed class PhoneShareServer
     }
 
     /// Call on the UI thread; request handling is marshalled back to it.
-    public void Start()
+    /// Listens on <paramref name="preferredPort"/> so links stay the same; falls back to a free port if it is taken.
+    public void Start(int preferredPort, string token)
     {
         Stop();
         ui = SynchronizationContext.Current ?? ui;
-        Token = MakeToken();
+        Token = token;
         try
         {
-            listener = new TcpListener(IPAddress.Any, 0);
-            listener.Start();
+            listener = Listen(preferredPort);
             Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             cancel = new CancellationTokenSource();
             _ = AcceptLoop(listener, cancel.Token);
@@ -82,10 +82,30 @@ internal sealed class PhoneShareServer
     }
 
     /// Invalidates links already handed out.
-    public void RegenerateToken()
+    public void SetToken(string token)
     {
-        Token = MakeToken();
+        Token = token;
         StateChanged?.Invoke();
+    }
+
+    private static TcpListener Listen(int preferredPort)
+    {
+        if (preferredPort is > 0 and <= 65535)
+        {
+            var fixedPort = new TcpListener(IPAddress.Any, preferredPort);
+            try
+            {
+                fixedPort.Start();
+                return fixedPort;
+            }
+            catch (SocketException)
+            {
+                // Taken by another program; a new port means a new link, which PhoneShare saves.
+            }
+        }
+        var any = new TcpListener(IPAddress.Any, 0);
+        any.Start();
+        return any;
     }
 
     // MARK: Connections
@@ -225,7 +245,7 @@ internal sealed class PhoneShareServer
 
     // MARK: Network helpers
 
-    private static string MakeToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+    internal static string MakeToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 
     /// Loopback, link-local and private (RFC 1918 / ULA) addresses only.
     internal static bool IsLocal(IPAddress address)

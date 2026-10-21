@@ -62,9 +62,21 @@ Settings → 剪貼簿: on/off, keep 50/100/200/500, 清除一般紀錄…. Stor
 ### 在手機上開啟 (phone access)
 
 Same page and routes as macOS (`GET /`, `GET /api/items?v=`, `GET /api/items/<id>/image[?thumb=1]`,
-`POST /api/items/<id>/to-mac`, `POST /api/send`), with "Mac" worded as 電腦. The window shows a QR code; the phone must be on
-the same network. A 128-bit token is required on every request, connections from non-private addresses are refused, a
-request is capped at 40 MB, and sharing stops after 30 idle minutes. 換一組網址 invalidates old links.
+`POST /api/items/<id>/to-mac`, `POST /api/send`), with "Mac" worded as 電腦, plus `GET /api/latest` (newest text entry as
+plain text). The phone must be on the same network. A 128-bit token is required on every request, connections from
+non-private addresses are refused, and a request is capped at 40 MB.
+
+**Unlike macOS, sharing is a switch (tray → 手機連線) with a fixed link**, at the user's request, so it can be bookmarked or
+used from iOS Shortcuts: the port and token are created once and kept in `settings.json`, the switch is remembered across
+restarts, and there is no 30-minute idle stop. 換一組網址 replaces the token (old links and Shortcuts stop working). If the saved
+port is taken by another program a free one is used and saved. The link also changes when the PC's IP address changes, so a
+DHCP reservation on the router is recommended. 在手機上開啟… shows the QR code and the Shortcut addresses:
+
+| iOS Shortcut ("Get Contents of URL") | Method | URL |
+| --- | --- | --- |
+| Send text to the PC | POST, body = text | `http://<ip>:<port>/api/send?t=<token>` |
+| Send a photo to the PC | POST, body = image file | `http://<ip>:<port>/api/send?t=<token>` |
+| Get the PC's newest text | GET | `http://<ip>:<port>/api/latest?t=<token>` |
 
 **The first time, Windows Defender Firewall asks whether SuYanShot may accept connections. Allow it on private networks**,
 otherwise the phone cannot reach the page. Photos from the phone are decoded by GDI+ (JPEG/PNG with EXIF rotation) or the
@@ -118,11 +130,12 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 39 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 40 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; and every phone route driven over loopback (403 without / with a wrong /
-  with a regenerated token, page, unchanged poll, text and JPEG upload, thumbnail and full image, to-mac, 404, 400).
+  with a regenerated token, page, unchanged poll, text and JPEG upload, thumbnail and full image, to-mac, latest, 404, 400),
+  and the fixed link surviving a restart (same port and token, switch remembered, 換一組網址 saved).
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
 - The app was launched with the clipboard feature and stayed running.
 - Tried by the user: region / window / full-screen / delayed capture and the settings window (2026-10-21).

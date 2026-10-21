@@ -18,9 +18,10 @@ internal sealed class ClipboardFeature : IDisposable
     {
         this.settings = settings;
         Store = new ClipboardStore(limit: settings.ClipboardLimit);
-        PhoneShare = new PhoneShare(Store, item => monitor.Ignore(Paster.Write(item, Store)));
+        PhoneShare = new PhoneShare(Store, item => monitor.Ignore(Paster.Write(item, Store)), settings);
         monitor.Captured += snapshot => Store.Add(snapshot);
         if (settings.ClipboardEnabled) monitor.Start();
+        if (PhoneShare.IsEnabled) PhoneShare.Start();
     }
 
     public bool IsEnabled

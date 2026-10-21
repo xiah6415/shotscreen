@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using SuYanShot.App;
 using SuYanShot.ClipboardHistory;
 using SuYanShot.UI;
 using Xunit;
@@ -152,7 +153,7 @@ public sealed class PhoneShareRoutesTests : IDisposable
     {
         var store = new ClipboardStore(folder);
         store.Add(new ClipboardSnapshot(ClipboardKind.Text) { Text = "來自電腦" });
-        var share = new PhoneShare(store, putOnClipboard.Add);
+        var share = new PhoneShare(store, putOnClipboard.Add, Settings());
         share.Start();
         try
         {
@@ -204,6 +205,9 @@ public sealed class PhoneShareRoutesTests : IDisposable
             Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/api/items/{Guid.NewGuid()}/image?{t}")).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsync("/api/send?" + t, new StringContent("  "))).StatusCode);
 
+            var latest = await http.GetAsync("/api/latest?" + t);
+            Assert.Equal("來自電腦", await latest.Content.ReadAsStringAsync()); // newest *text* entry, not the image
+
             var oldToken = share.Token;
             share.RegenerateLink();
             Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync("/?t=" + oldToken)).StatusCode);
@@ -212,6 +216,42 @@ public sealed class PhoneShareRoutesTests : IDisposable
         {
             share.Stop();
         }
+    }
+
+    private AppSettings Settings() => new() { FilePath = Path.Combine(folder, "settings.json") };
+
+    [Fact]
+    public async Task LinkStaysTheSameAcrossRestartsAndTheSwitchIsRemembered()
+    {
+        var store = new ClipboardStore(folder);
+        var settings = Settings();
+        var share = new PhoneShare(store, putOnClipboard.Add, settings);
+        share.IsEnabled = true;
+        var (port, token) = (share.Port, share.Token);
+        share.Stop();
+
+        // A new app launch reads the same settings file.
+        var reloaded = AppSettings.Load(settings.FilePath);
+        Assert.True(reloaded.PhoneShareEnabled);
+        var again = new PhoneShare(store, putOnClipboard.Add, reloaded);
+        again.Start();
+        try
+        {
+            Assert.Equal(port, again.Port);
+            Assert.Equal(token, again.Token);
+            using var http = new HttpClient();
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://127.0.0.1:{port}/?t={token}")).StatusCode);
+
+            again.RegenerateLink();
+            Assert.NotEqual(token, again.Token);
+            Assert.Equal(again.Token, AppSettings.Load(settings.FilePath).PhoneShareToken);
+            Assert.Equal(port, again.Port);
+        }
+        finally
+        {
+            again.IsEnabled = false;
+        }
+        Assert.False(AppSettings.Load(settings.FilePath).PhoneShareEnabled);
     }
 
     public void Dispose()

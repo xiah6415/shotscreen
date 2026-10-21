@@ -42,8 +42,11 @@ internal sealed class TrayApplication : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         actionItems[ShortcutAction.Clipboard] = Item("剪貼簿紀錄", () => clipboard!.TogglePanel());
         menu.Items.Add(actionItems[ShortcutAction.Clipboard]);
+        var phoneSwitch = new ToolStripMenuItem("手機連線", null, (_, _) => clipboard!.PhoneShare.IsEnabled = !clipboard.PhoneShare.IsEnabled);
+        menu.Items.Add(phoneSwitch);
         menu.Items.Add(Item("在手機上開啟…", () => clipboard!.ShowPhoneShare()));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Opening += (_, _) => phoneSwitch.Checked = clipboard!.PhoneShare.IsRunning;
         menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
         menu.Items.Add(Item("設定…", OpenSettings));
         menu.Items.Add(new ToolStripSeparator());

@@ -3,15 +3,17 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using SuYanShot.App;
 using static SuYanShot.ClipboardHistory.PhoneShareServer;
 
 namespace SuYanShot.ClipboardHistory;
 
 /// Serves the clipboard history to a phone browser on the same network, and accepts text/images sent back.
-/// Same routes and page as macOS. Runs only after the user starts it, and stops by itself after 30 idle minutes.
+/// Same routes and page as macOS, plus GET /api/latest for iOS Shortcuts.
+/// Unlike macOS this is an on/off switch that survives restarts, with a port and token that stay the same until
+/// 換一組網址, so a phone bookmark or Shortcut keeps working (macOS stops after 30 idle minutes with a new link each time).
 internal sealed class PhoneShare
 {
-    public static readonly TimeSpan IdleLimit = TimeSpan.FromMinutes(30);
     private const int MaxTextLength = 100_000;
 
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -20,7 +22,7 @@ internal sealed class PhoneShare
     /// Puts an entry on this PC's clipboard (without recording it again).
     private readonly Action<ClipboardItem> putOnClipboard;
     private readonly PhoneShareServer server;
-    private readonly System.Windows.Forms.Timer idleTimer = new() { Interval = (int)IdleLimit.TotalMilliseconds };
+    private readonly AppSettings settings;
     private static readonly Lazy<byte[]> Page = new(LoadPage);
 
     public bool IsRunning => server.Status == State.Running;
@@ -31,46 +33,67 @@ internal sealed class PhoneShare
     /// Raised on the UI thread whenever the state, link or last activity changes.
     public event Action? Changed;
 
-    public PhoneShare(ClipboardStore store, Action<ClipboardItem> putOnClipboard)
+    public PhoneShare(ClipboardStore store, Action<ClipboardItem> putOnClipboard, AppSettings settings)
     {
         this.store = store;
         this.putOnClipboard = putOnClipboard;
+        this.settings = settings;
         server = new PhoneShareServer(Handle);
         server.StateChanged += ServerStateChanged;
         server.Activity += () =>
         {
             LastActivity = DateTimeOffset.Now;
-            RestartIdleTimer();
             Changed?.Invoke();
         };
-        idleTimer.Tick += (_, _) => Stop();
     }
 
+    /// The 手機連線 switch. Remembered, so sharing comes back on when the app starts.
+    public bool IsEnabled
+    {
+        get => settings.PhoneShareEnabled;
+        set
+        {
+            settings.PhoneShareEnabled = value;
+            settings.Save();
+            if (value) Start(); else Stop();
+            Changed?.Invoke();
+        }
+    }
+
+    /// Starts with the saved port and token, creating and saving them the first time.
     public void Start()
     {
         if (IsRunning) return;
         Problem = null;
         LastActivity = null;
-        server.Start();
-        RestartIdleTimer();
+        if (string.IsNullOrEmpty(settings.PhoneShareToken))
+        {
+            settings.PhoneShareToken = MakeToken();
+            settings.Save();
+        }
+        server.Start(settings.PhoneSharePort, settings.PhoneShareToken);
+        if (IsRunning && server.Port != settings.PhoneSharePort)
+        {
+            settings.PhoneSharePort = server.Port;
+            settings.Save();
+        }
     }
 
-    public void Stop()
+    public void Stop() => server.Stop();
+
+    /// Invalidates the saved link (and any Shortcut using it).
+    public void RegenerateLink()
     {
-        idleTimer.Stop();
-        server.Stop();
+        settings.PhoneShareToken = MakeToken();
+        settings.Save();
+        server.SetToken(settings.PhoneShareToken);
     }
-
-    public void RegenerateLink() => server.RegenerateToken();
 
     internal int Port => server.Port;
     internal string Token => server.Token;
 
-    private void RestartIdleTimer()
-    {
-        idleTimer.Stop();
-        idleTimer.Start();
-    }
+    /// http://address:port, the part of the link before the path, for Shortcuts.
+    public string? BaseUrl { get; private set; }
 
     private void ServerStateChanged()
     {
@@ -79,7 +102,8 @@ internal sealed class PhoneShare
             case State.Running:
                 if (LocalIPv4Address() is string address)
                 {
-                    Url = $"http://{address}:{server.Port}/?t={server.Token}";
+                    BaseUrl = $"http://{address}:{server.Port}";
+                    Url = $"{BaseUrl}/?t={server.Token}";
                     Problem = null;
                 }
                 else
@@ -96,6 +120,7 @@ internal sealed class PhoneShare
                 Url = null;
                 break;
         }
+        if (Url == null) BaseUrl = null;
         Changed?.Invoke();
     }
 
@@ -108,6 +133,7 @@ internal sealed class PhoneShare
         if (method == "GET" && parts.Length == 0) return new Response(200, "text/html; charset=utf-8", Page.Value);
         if (method == "GET" && parts is ["api", "items"]) return ItemsResponse(request.Query.GetValueOrDefault("v"));
         if (method == "POST" && parts is ["api", "send"]) return await Receive(request);
+        if (method == "GET" && parts is ["api", "latest"]) return Latest();
         // /api/items/<id>/image and /api/items/<id>/to-mac (the route name is shared with the macOS page)
         if (parts is not ["api", "items", var id, var action] || !Guid.TryParse(id, out var guid) || store.Find(guid) is not ClipboardItem item)
             return Response.Text("Not Found", 404);
@@ -130,6 +156,12 @@ internal sealed class PhoneShare
                 return Response.Text("Not Found", 404);
         }
     }
+
+    /// The newest text entry as plain text, for "Get Contents of URL" in iOS Shortcuts. 404 when there is none.
+    private Response Latest() =>
+        store.Items.FirstOrDefault(i => i.Kind.IsText()) is { Text: string text }
+            ? Response.Text(text)
+            : Response.Text("沒有文字紀錄", 404);
 
     /// Text or an image from the phone: recorded in history (source 手機) and put on this PC's clipboard.
     private async Task<Response> Receive(Request request)
