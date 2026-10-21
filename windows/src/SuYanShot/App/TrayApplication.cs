@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using SuYanShot.Capture;
+using SuYanShot.ClipboardHistory;
 using SuYanShot.Shortcuts;
 using SuYanShot.Storage;
 using SuYanShot.UI;
@@ -16,6 +17,7 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly HotkeyManager hotkeys = new();
     private readonly NotifyIcon trayIcon;
     private readonly Dictionary<ShortcutAction, ToolStripMenuItem> actionItems = new();
+    private readonly ClipboardFeature clipboard;
     private SettingsWindow? settingsWindow;
 
     public TrayApplication()
@@ -38,10 +40,17 @@ internal sealed class TrayApplication : ApplicationContext
         }
         menu.Items.Add(delayed);
         menu.Items.Add(new ToolStripSeparator());
+        actionItems[ShortcutAction.Clipboard] = Item("剪貼簿紀錄", () => clipboard!.TogglePanel());
+        menu.Items.Add(actionItems[ShortcutAction.Clipboard]);
+        menu.Items.Add(Item("在手機上開啟…", () => clipboard!.ShowPhoneShare()));
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
         menu.Items.Add(Item("設定…", OpenSettings));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("結束 素顏 Shot", ExitThread));
+
+        // Created after the menu, so a WinForms synchronization context exists for the clipboard and phone server.
+        clipboard = new ClipboardFeature(AppSettings.Load());
 
         trayIcon = new NotifyIcon
         {
@@ -73,8 +82,15 @@ internal sealed class TrayApplication : ApplicationContext
             ShortcutAction.Window => coordinator.CaptureWindow(),
             ShortcutAction.FullScreen => coordinator.CaptureFullScreen(),
             ShortcutAction.Delayed => coordinator.CaptureDelayed(3),
+            ShortcutAction.Clipboard => ToggleClipboard(),
             _ => Task.CompletedTask,
         };
+    }
+
+    private Task ToggleClipboard()
+    {
+        clipboard.TogglePanel();
+        return Task.CompletedTask;
     }
 
     /// Registers the shortcuts, shows them in the menu, and returns the actions Windows refused.
@@ -93,7 +109,7 @@ internal sealed class TrayApplication : ApplicationContext
             settingsWindow.Activate();
             return;
         }
-        settingsWindow = new SettingsWindow(shortcutStore, ApplyShortcuts);
+        settingsWindow = new SettingsWindow(shortcutStore, ApplyShortcuts, clipboard);
         settingsWindow.FormClosed += (_, _) => settingsWindow = null;
         settingsWindow.Show();
         settingsWindow.Activate();
@@ -125,6 +141,7 @@ internal sealed class TrayApplication : ApplicationContext
     protected override void ExitThreadCore()
     {
         settingsWindow?.Close();
+        clipboard.Dispose();
         hotkeys.Dispose();
         trayIcon.Visible = false;
         trayIcon.Dispose();

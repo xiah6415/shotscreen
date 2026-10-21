@@ -1,9 +1,10 @@
 using SuYanShot.App;
+using SuYanShot.ClipboardHistory;
 using SuYanShot.Shortcuts;
 
 namespace SuYanShot.UI;
 
-/// 設定: a recorder per capture action (changes apply immediately), 還原預設, and 登入時啟動.
+/// 設定: a recorder per action (changes apply immediately), 還原預設, the 剪貼簿 section, and 登入時啟動.
 internal sealed class SettingsWindow : Form
 {
     private static readonly (ShortcutAction Action, string Title)[] Rows =
@@ -12,6 +13,7 @@ internal sealed class SettingsWindow : Form
         (ShortcutAction.Window, "視窗截圖"),
         (ShortcutAction.FullScreen, "全螢幕截圖"),
         (ShortcutAction.Delayed, "延遲截圖（3 秒）"),
+        (ShortcutAction.Clipboard, "剪貼簿紀錄"),
     };
 
     private readonly ShortcutStore store;
@@ -21,11 +23,15 @@ internal sealed class SettingsWindow : Form
     private const string DefaultHint = "點一下按鈕，再按下新的組合鍵。要包含 Ctrl、Alt 或 Win（F1–F24 和 PrintScreen 可以單獨用）。按 Esc 取消，按 Backspace 清除。";
 
     private readonly Label hint = Note(DefaultHint);
+    private readonly ClipboardFeature clipboard;
+    private readonly Label clipboardInfo = Note("");
 
     /// <param name="applyShortcuts">Registers the given shortcuts globally and returns the actions Windows refused.</param>
-    public SettingsWindow(ShortcutStore store, Func<IReadOnlyDictionary<ShortcutAction, KeyShortcut>, IReadOnlySet<ShortcutAction>> applyShortcuts)
+    public SettingsWindow(ShortcutStore store, Func<IReadOnlyDictionary<ShortcutAction, KeyShortcut>, IReadOnlySet<ShortcutAction>> applyShortcuts,
+                          ClipboardFeature clipboard)
     {
         this.store = store;
+        this.clipboard = clipboard;
         this.applyShortcuts = applyShortcuts;
 
         Text = "素顏 Shot 設定";
@@ -76,6 +82,28 @@ internal sealed class SettingsWindow : Form
         reset.Click += (_, _) => Display(store.ResetToDefaults());
         AddSpanning(layout, reset, row++);
 
+        AddSpanning(layout, Heading("剪貼簿"), row++);
+        var recordClipboard = new CheckBox { Text = "記錄複製過的文字、圖片和檔案", AutoSize = true, Checked = clipboard.IsEnabled, Margin = new Padding(0, 4, 0, 4) };
+        recordClipboard.CheckedChanged += (_, _) => clipboard.IsEnabled = recordClipboard.Checked;
+        AddSpanning(layout, recordClipboard, row++);
+        layout.Controls.Add(new Label { Text = "最多保留", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 12, 6) }, 0, row);
+        var limit = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(0, 3, 0, 3) };
+        limit.Items.AddRange(ClipboardStore.LimitOptions.Select(n => (object)$"{n} 筆").ToArray());
+        limit.SelectedIndex = Math.Max(0, Array.IndexOf(ClipboardStore.LimitOptions, clipboard.Limit));
+        limit.SelectedIndexChanged += (_, _) => clipboard.Limit = ClipboardStore.LimitOptions[limit.SelectedIndex];
+        layout.Controls.Add(limit, 1, row++);
+        var clear = new Button { Text = "清除一般紀錄…", AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+        clear.Click += (_, _) =>
+        {
+            var answer = MessageBox.Show(this, "常用和有標籤的會保留。這個動作無法復原。", "清除一般紀錄？", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer == DialogResult.OK) clipboard.Store.ClearUnkept();
+        };
+        AddSpanning(layout, clear, row++);
+        AddSpanning(layout, clipboardInfo, row++);
+        clipboard.Store.Changed += UpdateClipboardInfo;
+        UpdateClipboardInfo();
+        clipboardInfo.Margin = new Padding(0, 6, 0, 12);
+
         AddSpanning(layout, Heading("一般"), row++);
         var startAtLogin = new CheckBox { Text = "登入 Windows 時自動啟動", AutoSize = true, Checked = StartupRegistration.IsEnabled, Margin = new Padding(0, 4, 0, 4) };
         startAtLogin.CheckedChanged += (_, _) => StartupRegistration.IsEnabled = startAtLogin.Checked;
@@ -124,8 +152,12 @@ internal sealed class SettingsWindow : Form
         }
     }
 
+    private void UpdateClipboardInfo() =>
+        clipboardInfo.Text = $"目前 {clipboard.Store.Items.Count} 筆，存在這台電腦上，不會上傳。常用和有標籤的紀錄不會被自動清掉。密碼管理工具標為機密的內容不會被記錄。";
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        clipboard.Store.Changed -= UpdateClipboardInfo;
         Display(store.Load()); // re-register in case the window closed mid-recording
         base.OnFormClosed(e);
     }

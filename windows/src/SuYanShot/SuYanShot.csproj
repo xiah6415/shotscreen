@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SuYanShot.Tests" />
+    <EmbeddedResource Include="Clipboard\PhoneSharePage.html" LogicalName="SuYanShot.PhoneSharePage.html" />
   </ItemGroup>
 
 </Project>

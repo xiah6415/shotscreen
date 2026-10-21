@@ -14,6 +14,8 @@ internal sealed class ShortcutStore
         [ShortcutAction.Window] = "Ctrl+Shift+2",
         [ShortcutAction.FullScreen] = "Ctrl+Shift+3",
         [ShortcutAction.Delayed] = "Ctrl+Shift+4",
+        // macOS uses ⌘⇧V, but Ctrl+Shift+V is "paste as plain text" in browsers and Office, so it stays free here.
+        [ShortcutAction.Clipboard] = "Ctrl+Alt+V",
     };
 
     private static readonly JsonSerializerOptions WriteOptions = new()

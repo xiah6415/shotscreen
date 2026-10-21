@@ -8,6 +8,7 @@ internal enum ShortcutAction
     Window,
     FullScreen,
     Delayed,
+    Clipboard,
 }
 
 /// A global hotkey such as "Ctrl+Shift+1". Requires Ctrl, Alt or Win unless the key is F1–F24 or PrintScreen (macOS has the same rule for F-keys).
