@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using SuYanShot.Capture;
 using SuYanShot.Native;
@@ -7,8 +6,8 @@ using SuYanShot.Storage;
 namespace SuYanShot.UI;
 
 /// The preview card shown in the bottom-right corner after a capture, like the macOS app:
-/// hover shows 複製 / 儲存 / ✕, it closes by itself after 8 s unless hovered, drag it into another app to drop a PNG,
-/// and double-click saves it and opens it in the default viewer.
+/// hover shows 複製 / 標註 / 儲存 / ✕, it closes by itself after 8 s unless hovered, drag it into another app to drop a PNG,
+/// and double-click opens the annotation editor.
 internal sealed class FloatingThumbnail : Form
 {
     private const int CardWidth = 260;
@@ -17,6 +16,8 @@ internal sealed class FloatingThumbnail : Form
 
     private readonly Bitmap image;
     private readonly ImageExporter exporter;
+    private readonly DateTime capturedAt = DateTime.Now;
+    private readonly Action<Bitmap, DateTime> openEditor;
     private readonly System.Windows.Forms.Timer dismissTimer = new() { Interval = AutoDismissMs };
     private readonly System.Windows.Forms.Timer hoverTimer = new() { Interval = 150 };
     private string? savedPath;
@@ -26,12 +27,14 @@ internal sealed class FloatingThumbnail : Form
 
     private static readonly List<FloatingThumbnail> Open = new();
 
-    private enum Button { None, Copy, Save, Close }
+    private enum Button { None, Copy, Annotate, Save, Close }
 
-    public FloatingThumbnail(Bitmap image, ImageExporter exporter, Screen screen)
+    /// <param name="openEditor">Opens the annotation editor on a copy of the image and the capture time.</param>
+    public FloatingThumbnail(Bitmap image, ImageExporter exporter, Screen screen, Action<Bitmap, DateTime> openEditor)
     {
         this.image = image;
         this.exporter = exporter;
+        this.openEditor = openEditor;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         AutoScaleMode = AutoScaleMode.None;
@@ -107,15 +110,16 @@ internal sealed class FloatingThumbnail : Form
         return button switch
         {
             Button.Close => new Rectangle(Width - size - gap, gap, size, size),
-            Button.Copy => new Rectangle(Width / 2 - size - gap / 2, Height / 2 - size / 2, size, size),
-            Button.Save => new Rectangle(Width / 2 + gap / 2, Height / 2 - size / 2, size, size),
+            Button.Copy => new Rectangle(Width / 2 - size / 2 - size - gap, Height / 2 - size / 2, size, size),
+            Button.Annotate => new Rectangle(Width / 2 - size / 2, Height / 2 - size / 2, size, size),
+            Button.Save => new Rectangle(Width / 2 + size / 2 + gap, Height / 2 - size / 2, size, size),
             _ => Rectangle.Empty,
         };
     }
 
     private Button HitTest(Point p)
     {
-        foreach (var button in new[] { Button.Close, Button.Copy, Button.Save })
+        foreach (var button in new[] { Button.Close, Button.Copy, Button.Annotate, Button.Save })
             if (ButtonRect(button).Contains(p)) return button;
         return Button.None;
     }
@@ -137,6 +141,7 @@ internal sealed class FloatingThumbnail : Form
             using var shade = new SolidBrush(Color.FromArgb(120, 0, 0, 0));
             g.FillRectangle(shade, ClientRectangle);
             DrawButton(g, Button.Copy, "\uE8C8");
+            DrawButton(g, Button.Annotate, "\uE70F");
             DrawButton(g, Button.Save, "\uE74E");
             DrawButton(g, Button.Close, "\uE711");
         }
@@ -191,6 +196,9 @@ internal sealed class FloatingThumbnail : Form
                 ClipboardManager.Copy(image);
                 ShowToast("已複製");
                 break;
+            case Button.Annotate:
+                OpenEditor();
+                break;
             case Button.Save:
                 Save();
                 ShowToast("已存到桌面");
@@ -203,9 +211,13 @@ internal sealed class FloatingThumbnail : Form
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
     {
-        if (HitTest(e.Location) != Button.None) return;
-        var path = Save();
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        if (HitTest(e.Location) == Button.None) OpenEditor();
+    }
+
+    /// The editor gets its own copy; this card closes, as on macOS.
+    private void OpenEditor()
+    {
+        openEditor(new Bitmap(image), capturedAt);
         Close();
     }
 

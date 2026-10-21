@@ -9,6 +9,7 @@ internal sealed class SettingsWindow : Form
 {
     private static readonly (ShortcutAction Action, string Title)[] Rows =
     {
+        (ShortcutAction.AllInOne, "All-in-One"),
         (ShortcutAction.Region, "框選截圖"),
         (ShortcutAction.Window, "視窗截圖"),
         (ShortcutAction.FullScreen, "全螢幕截圖"),

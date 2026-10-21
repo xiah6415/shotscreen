@@ -1,3 +1,4 @@
+using SuYanShot.Annotations;
 using SuYanShot.Storage;
 using SuYanShot.UI;
 
@@ -27,11 +28,30 @@ internal sealed class CaptureCoordinator
         // Snapshot the window list before our overlays exist so they can never be picked.
         var windows = WindowList.Snapshot();
         using var desktop = ScreenCapture.FreezeDesktop();
+        return await PickWindow(desktop, windows);
+    });
+
+    /// All-in-One: adjust a region, then capture it, or switch to window / full-screen capture on the same frozen desktop.
+    public Task CaptureAllInOne() => Run(async () =>
+    {
+        var windows = WindowList.Snapshot();
+        using var desktop = ScreenCapture.FreezeDesktop();
+        return await AllInOneSession.Run(desktop) switch
+        {
+            AllInOneAction.Capture capture => desktop.Crop(capture.ScreenRect),
+            AllInOneAction.Window => await PickWindow(desktop, windows),
+            AllInOneAction.FullScreen full => desktop.Crop(full.Monitor),
+            _ => null,
+        };
+    });
+
+    private static async Task<Bitmap?> PickWindow(FrozenDesktop desktop, IReadOnlyList<WindowInfo> windows)
+    {
         var result = await SelectionSession.Run(desktop, SelectionMode.Window, windows);
         if (result is not SelectionResult.Window window) return null;
         await Task.Delay(50); // let the overlays disappear before PrintWindow asks the window to repaint
         return ScreenCapture.CaptureWindow(window.Info.Handle, desktop);
-    });
+    }
 
     /// The whole monitor under the pointer, no picker (same as macOS).
     public Task CaptureFullScreen() => Run(() => Task.FromResult<Bitmap?>(ScreenCapture.CaptureRect(ScreenCapture.ScreenUnderCursor().Bounds)));
@@ -63,6 +83,13 @@ internal sealed class CaptureCoordinator
         }
         if (image == null) return;
         ClipboardManager.Copy(image);
-        new FloatingThumbnail(image, exporter, ScreenCapture.ScreenUnderCursor()).Show();
+        new FloatingThumbnail(image, exporter, ScreenCapture.ScreenUnderCursor(), OpenEditor).Show();
+    }
+
+    private void OpenEditor(Bitmap image, DateTime capturedAt)
+    {
+        var editor = new AnnotationEditor(image, capturedAt, exporter);
+        editor.Show();
+        editor.Activate();
     }
 }

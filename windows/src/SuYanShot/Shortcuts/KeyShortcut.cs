@@ -4,6 +4,7 @@ namespace SuYanShot.Shortcuts;
 
 internal enum ShortcutAction
 {
+    AllInOne,
     Region,
     Window,
     FullScreen,

@@ -7,9 +7,10 @@ namespace SuYanShot.Shortcuts;
 /// An action saved as "" means the user cleared it; a missing action gets its default.
 internal sealed class ShortcutStore
 {
-    /// ⌘⇧1–4 on macOS become Ctrl+Shift+1–4 here.
+    /// ⌘⇧1–5 on macOS become Ctrl+Shift+1–5 here.
     public static readonly IReadOnlyDictionary<ShortcutAction, string> Defaults = new Dictionary<ShortcutAction, string>
     {
+        [ShortcutAction.AllInOne] = "Ctrl+Shift+5",
         [ShortcutAction.Region] = "Ctrl+Shift+1",
         [ShortcutAction.Window] = "Ctrl+Shift+2",
         [ShortcutAction.FullScreen] = "Ctrl+Shift+3",

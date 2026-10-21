@@ -77,7 +77,8 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         var shortcuts = new ShortcutStore(file).Load();
         Assert.Equal("Ctrl+Shift+1", shortcuts[ShortcutAction.Region].ToString());
-        Assert.Equal(5, shortcuts.Count);
+        Assert.Equal(6, shortcuts.Count);
+        Assert.Equal("Ctrl+Shift+5", shortcuts[ShortcutAction.AllInOne].ToString());
         Assert.Equal("Ctrl+Alt+V", shortcuts[ShortcutAction.Clipboard].ToString());
     }
 
@@ -109,7 +110,7 @@ public sealed class ShortcutStoreTests : IDisposable
         store.Set(ShortcutAction.Delayed, null);
         Assert.False(new ShortcutStore(file).Load().ContainsKey(ShortcutAction.Delayed));
 
-        Assert.Equal(5, store.ResetToDefaults().Count);
+        Assert.Equal(6, store.ResetToDefaults().Count);
         Assert.False(File.Exists(file));
     }
 
@@ -118,7 +119,7 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, "{ not json");
-        Assert.Equal(5, new ShortcutStore(file).Load().Count);
+        Assert.Equal(6, new ShortcutStore(file).Load().Count);
     }
 
     public void Dispose()
@@ -157,5 +158,18 @@ public sealed class FrozenDesktopTests
         using var content = new Bitmap(50, 50);
         using (var g = Graphics.FromImage(content)) g.Clear(Color.SteelBlue);
         Assert.False(ScreenCapture.LooksBlank(content));
+    }
+}
+
+public sealed class AllInOneTests
+{
+    [Fact]
+    public void ResizingPastTheOppositeEdgeFlipsTheBox()
+    {
+        var box = new Rectangle(100, 100, 50, 40);
+        Assert.Equal(Rectangle.FromLTRB(100, 100, 180, 140), AllInOneOverlay.Resized(box, AllInOneOverlay.Grip.Right, new Point(180, 0)));
+        Assert.Equal(Rectangle.FromLTRB(60, 100, 100, 140), AllInOneOverlay.Resized(box, AllInOneOverlay.Grip.Right, new Point(60, 0)));
+        Assert.Equal(Rectangle.FromLTRB(120, 140, 150, 170), AllInOneOverlay.Resized(box, AllInOneOverlay.Grip.TopLeft, new Point(120, 170)));
+        Assert.Equal(Rectangle.FromLTRB(100, 90, 150, 140), AllInOneOverlay.Resized(box, AllInOneOverlay.Grip.Top, new Point(999, 90)));
     }
 }

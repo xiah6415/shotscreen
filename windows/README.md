@@ -30,17 +30,31 @@ dotnet publish src/SuYanShot -c Release -r win-x64 --self-contained false -p:Pub
 
 | Feature | Default shortcut | macOS equivalent |
 | --- | --- | --- |
+| All-in-One: drag a region, adjust it (move, 8 handles, flips past the opposite edge), then 截圖 (Enter / double-click), 視窗 or 全螢幕 from the toolbar; Esc / right-click cancels | Ctrl+Shift+5 | ⌘⇧5 |
 | 框選截圖: drag a region on a frozen copy of the screen; Esc / right-click cancels; size label and crosshair guides | Ctrl+Shift+1 | ⌘⇧1 |
 | 視窗截圖: hover highlights the front-most window, click captures it (even where other windows cover it) | Ctrl+Shift+2 | ⌘⇧2 |
 | 全螢幕截圖: the monitor under the pointer | Ctrl+Shift+3 | ⌘⇧3 |
 | 延遲截圖: 3 / 5 / 10 s countdown (click the countdown to cancel), then full screen | Ctrl+Shift+4 (3 s) | ⌘⇧4 |
 
 Every capture is copied to the clipboard (bitmap + PNG) and shown on a preview card in the bottom-right corner:
-hover for 複製 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click to save and open it.
+hover for 複製 / 標註 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click (or 標註) to open the
+annotation editor.
 The card closes after 8 s unless hovered. Saved files go to the Desktop as `Screenshot 2026-10-21 at 14.03.07.png`, the same
 naming as macOS.
 
 Tray menu also has 剪貼簿紀錄, 在手機上開啟…, 打開截圖資料夾 and 設定….
+
+### 標註 (annotation editor)
+
+Same tools, keys and behaviour as macOS: 選取 (V), 裁切 (C), 箭頭 (A), 矩形 (R), 橢圓 (O), 直線 (L), 畫筆 (P), 螢光筆 (H),
+文字 (T), 數字標記 (N), 馬賽克 (B), 模糊 (U); 7 colours and 3 sizes (changing them restyles the selected mark); Shift
+constrains shapes to squares/circles and lines to 45°; Delete/Backspace removes the selection; double-click or Enter on a
+text mark edits it. Crop: drag a box, Enter applies, Esc cancels, Backspace restores the full image. Ctrl+Z / Ctrl+Shift+Z
+(or Ctrl+Y) undo and redo (crop included), Ctrl+C copies, Ctrl+S saves to the Desktop with the capture's time, Ctrl+W closes.
+Geometry is stored in image pixels, so the canvas and the exported image use the same renderer.
+
+Differences from macOS, from GDI+: the soft shadow under marks is a translucent offset stroke, the highlighter is a
+translucent stroke rather than a multiply blend, and the text box shows on a plain backdrop while typing.
 
 ### 剪貼簿紀錄 (clipboard history)
 
@@ -102,6 +116,9 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - `Capture/ScreenCapture.cs` — `FrozenDesktop`, GDI screen capture, `PrintWindow` window capture with a fallback.
 - `Capture/SelectionOverlay.cs` — one overlay per monitor for region and window selection.
 - `Capture/WindowList.cs` — visible top-level windows in z-order.
+- `Capture/AllInOneSelector.cs` — the All-in-One overlay (adjustable region and its toolbar).
+- `Annotation/` (namespace `SuYanShot.Annotations`) — model, renderer + pixelate/blur effects, editor state with undo,
+  canvas, and the editor window with its code-drawn toolbar.
 - `Shortcuts/` — `RegisterHotKey` wrapper, shortcut parsing and the JSON store.
 - `Clipboard/` (namespace `SuYanShot.ClipboardHistory`, to avoid clashing with WinForms' `Clipboard`) — model, store,
   monitor, paster, feature, and phone sharing (`PhoneShareServer` = TcpListener HTTP server, `PhoneShare` = routes,
@@ -130,18 +147,22 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 40 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 47 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; and every phone route driven over loopback (403 without / with a wrong /
   with a regenerated token, page, unchanged poll, text and JPEG upload, thumbnail and full image, to-mac, latest, 404, 400),
-  and the fixed link surviving a restart (same port and token, switch remembered, 換一組網址 saved).
+  and the fixed link surviving a restart (same port and token, switch remembered, 換一組網址 saved); All-in-One resizing;
+  annotation state (undo/redo with crop, counters, text edit/clear, restyling and moving the selection) and the renderer
+  (every mark kind changes the flattened image, crop, hit testing). The flattened test image was also checked by eye.
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
 - The app was launched with the clipboard feature and stayed running.
 - Tried by the user: region / window / full-screen / delayed capture and the settings window (2026-10-21).
-- Not yet tried by the user: clipboard panel, paste-back, phone page on a real phone, firewall prompt.
+- Tried by the user: clipboard history and phone access (2026-10-21).
+- Not yet tried by the user: phone switch with a fixed link / iOS Shortcuts, All-in-One, annotation editor.
 
 ## Not yet ported
 
-All-in-One, scroll capture (the stitching algorithm in `Capture/ScrollStitcher.swift` should be ported as-is and tested against
-the same synthetic cases described in `memory.md`), annotation editor, screen recording / GIF, and the 錄影 section of the settings window.
+Scroll capture (the stitching algorithm in `Capture/ScrollStitcher.swift` should be ported as-is and tested against
+the same synthetic cases described in `memory.md`), screen recording / GIF, and the 錄影 section of the settings window. Both will also add their
+buttons (捲動截圖, 錄影) to the All-in-One toolbar.

@@ -26,6 +26,9 @@ internal sealed class TrayApplication : ApplicationContext
         hotkeys.Pressed += OnHotkey;
 
         var menu = new ContextMenuStrip();
+        actionItems[ShortcutAction.AllInOne] = Item("All-in-One", () => coordinator.CaptureAllInOne());
+        menu.Items.Add(actionItems[ShortcutAction.AllInOne]);
+        menu.Items.Add(new ToolStripSeparator());
         actionItems[ShortcutAction.Region] = Item("框選截圖", () => coordinator.CaptureRegion());
         actionItems[ShortcutAction.Window] = Item("視窗截圖", () => coordinator.CaptureWindow());
         actionItems[ShortcutAction.FullScreen] = Item("全螢幕截圖", () => coordinator.CaptureFullScreen());
@@ -81,6 +84,7 @@ internal sealed class TrayApplication : ApplicationContext
     {
         _ = action switch
         {
+            ShortcutAction.AllInOne => coordinator.CaptureAllInOne(),
             ShortcutAction.Region => coordinator.CaptureRegion(),
             ShortcutAction.Window => coordinator.CaptureWindow(),
             ShortcutAction.FullScreen => coordinator.CaptureFullScreen(),
