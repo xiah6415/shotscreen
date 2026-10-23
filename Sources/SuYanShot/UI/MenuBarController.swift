@@ -45,6 +45,7 @@ final class MenuBarController: NSObject {
         let recordMenu = NSMenu(title: "錄影")
         actionItems[.record] = item("框選範圍錄影", symbol: "rectangle.dashed", action: #selector(recordRegion))
         recordMenu.addItem(actionItems[.record]!)
+        recordMenu.addItem(item("視窗錄影", symbol: "macwindow", action: #selector(recordWindow)))
         recordMenu.addItem(item("全螢幕錄影", symbol: "display", action: #selector(recordFullScreen)))
         record.submenu = recordMenu
         menu.addItem(record)
@@ -94,6 +95,7 @@ final class MenuBarController: NSObject {
     @objc private func scrollCapture() { coordinator.captureScrolling() }
     @objc private func recordRegion() { coordinator.recordRegion() }
     @objc private func recordFullScreen() { coordinator.recordFullScreen() }
+    @objc private func recordWindow() { coordinator.recordWindow() }
     @objc private func stopRecording() { coordinator.stopRecording() }
     @objc private func delayCapture(_ sender: NSMenuItem) { if let option = sender.representedObject as? DelayOption { coordinator.captureDelayed(option) } }
     @objc private func openFolder() { coordinator.openCaptureFolder() }

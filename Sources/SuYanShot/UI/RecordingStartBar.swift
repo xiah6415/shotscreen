@@ -2,8 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
-/// Shown after choosing what to record and before recording starts: sound toggles (shared with Settings)
-/// plus 開始錄影 / 取消. Return starts, Esc cancels.
+/// Shown after choosing what to record (full screen, a window) and before recording starts: sound controls
+/// (shared with Settings) plus 開始錄影 / 取消. Return starts, Esc cancels.
 @MainActor
 final class RecordingStartBar {
     private var border: NSPanel?
@@ -13,7 +13,9 @@ final class RecordingStartBar {
     private var onCancel: (() -> Void)?
 
     /// `region` is in global Cocoa coordinates; nil means the whole `screen`.
-    func show(region: CGRect?, on screen: NSScreen, settings: RecordingSettings, onStart: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    /// `windowAppName` switches the sound source menu to "this window's app / all sound".
+    func show(region: CGRect?, on screen: NSScreen, settings: RecordingSettings, windowAppName: String? = nil,
+              onStart: @escaping () -> Void, onCancel: @escaping () -> Void) {
         close()
         self.onStart = onStart
         self.onCancel = onCancel
@@ -51,6 +53,7 @@ final class RecordingStartBar {
         bar.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         bar.contentView = NSHostingView(rootView: RecordingStartView(
             settings: settings,
+            windowAppName: windowAppName,
             onStart: { [weak self] in self?.finish(start: true) },
             onCancel: { [weak self] in self?.finish(start: false) }))
         bar.makeKeyAndOrderFront(nil)
@@ -85,18 +88,15 @@ final class RecordingStartBar {
 }
 
 private struct RecordingStartView: View {
-    static let width: CGFloat = 400
+    static let width: CGFloat = 560
     @ObservedObject var settings: RecordingSettings
+    let windowAppName: String?
     let onStart: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            SoundToggle(title: "系統聲音", on: "speaker.wave.2.fill", off: "speaker.slash", isOn: $settings.systemAudio)
-                .help("錄下電腦播放的聲音")
-            SoundToggle(title: "麥克風", on: "mic.fill", off: "mic.slash", isOn: $settings.microphone)
-                .disabled(!RecordingSettings.microphoneSupported)
-                .help(RecordingSettings.microphoneSupported ? "錄下你的聲音（第一次會請你允許使用麥克風）" : "需要 macOS 15 以上")
+            RecordingSoundControls(settings: settings, windowAppName: windowAppName)
             Spacer(minLength: 4)
             Button("取消", action: onCancel)
                 .help("Esc")
@@ -108,30 +108,6 @@ private struct RecordingStartView: View {
         .padding(.horizontal, 12)
         .frame(width: Self.width, height: 52)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-private struct SoundToggle: View {
-    let title: String
-    let on: String
-    let off: String
-    @Binding var isOn: Bool
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Button { isOn.toggle() } label: {
-            HStack(spacing: 5) {
-                Image(systemName: isOn ? on : off).frame(width: 16)
-                Text(title).font(.system(size: 12, weight: .medium))
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(isOn ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.06), in: Capsule())
-            .foregroundStyle(isOn ? Color.accentColor : .secondary)
-            .opacity(isEnabled ? 1 : 0.4)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }
 
