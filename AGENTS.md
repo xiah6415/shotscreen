@@ -51,6 +51,6 @@ For an app bundle / signed distribution, create an Xcode project from the packag
 4. State precisely which interactive checks were actually performed.
 
 ## Modules not to change casually
-- `Capture/ScrollStitcher.swift`: offset matching and stitching; re-run the synthetic stitching test (see `memory.md`) after changing it.
+- `Capture/ScrollStitcher.swift`: offset matching and stitching; run `scripts/test-stitcher.sh` after changing it.
 - `Models/CaptureModels.swift`: coordinates and scale contracts shared by capture services.
 - `Storage/ImageExporter.swift`: owns naming/export policy; keep that policy out of UI.
