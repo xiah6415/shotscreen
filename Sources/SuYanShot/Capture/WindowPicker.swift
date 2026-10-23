@@ -1,7 +1,9 @@
 import AppKit
 import ScreenCaptureKit
+import SwiftUI
 
 /// Hover-to-highlight window picker: the window under the pointer is highlighted, click captures it, Esc cancels.
+/// With `listed` windows it also shows a dropdown, so covered windows or ones on other desktops can be chosen by name.
 @MainActor
 final class WindowPicker: NSObject {
     struct Candidate {
@@ -14,7 +16,7 @@ final class WindowPicker: NSObject {
     private var candidates: [Candidate] = []
     private var completion: ((SCWindow?) -> Void)?
 
-    func begin(windows: [SCWindow], completion: @escaping (SCWindow?) -> Void) {
+    func begin(windows: [SCWindow], listed: [SCWindow] = [], completion: @escaping (SCWindow?) -> Void) {
         finish(nil)
         self.completion = completion
         candidates = Self.frontToBack(windows)
@@ -25,7 +27,16 @@ final class WindowPicker: NSObject {
             panel.makeKeyAndOrderFront(nil)
             return panel
         }
-        (panels.first { $0.screen == NSScreen.underMouse } ?? panels.first)?.makeKey()
+        let main = panels.first { $0.screen == NSScreen.underMouse } ?? panels.first
+        main?.makeKey()
+        if !listed.isEmpty, let view = main?.contentView {
+            let bar = NSHostingView(rootView: WindowListBar(windows: listed,
+                                                            onPick: { [weak self] window in self?.finish(window) },
+                                                            onCancel: { [weak self] in self?.cancel() }))
+            let size = bar.fittingSize
+            bar.frame = CGRect(x: (view.bounds.width - size.width) / 2, y: view.bounds.height - size.height - 60, width: size.width, height: size.height)
+            view.addSubview(bar)
+        }
         pointerMoved()
     }
 
@@ -114,4 +125,43 @@ private final class WindowHighlightView: NSView {
     override func mouseDown(with event: NSEvent) { picker?.pick() }
     override func rightMouseDown(with event: NSEvent) { picker?.cancel() }
     override func keyDown(with event: NSEvent) { if event.keyCode == 53 { picker?.cancel() } }
+}
+
+/// 「或從清單選」: every shareable window grouped by app, including covered ones and those on other desktops.
+private struct WindowListBar: View {
+    let windows: [SCWindow]
+    let onPick: (SCWindow) -> Void
+    let onCancel: () -> Void
+
+    private var groups: [(app: String, windows: [SCWindow])] {
+        Dictionary(grouping: windows) { $0.owningApplication?.applicationName ?? "其他" }
+            .map { ($0.key, $0.value) }
+            .sorted { $0.app.localizedStandardCompare($1.app) == .orderedAscending }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "macwindow").foregroundStyle(.secondary)
+            Text("把游標移到視窗上點一下，或從清單選：").font(.system(size: 13))
+            Menu("選擇視窗") {
+                ForEach(groups, id: \.app) { group in
+                    Section(group.app) {
+                        ForEach(group.windows, id: \.windowID) { window in
+                            Button(title(of: window)) { onPick(window) }
+                        }
+                    }
+                }
+            }
+            .fixedSize()
+            Button("取消", action: onCancel)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func title(of window: SCWindow) -> String {
+        let name = window.title?.isEmpty == false ? window.title! : "（沒有標題）"
+        return window.isOnScreen ? name : "\(name)（在其他桌面或被縮小）"
+    }
 }

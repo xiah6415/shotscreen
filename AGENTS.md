@@ -19,7 +19,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - `Update`: GitHub Releases check (`UpdateChecker`), preferences, and the verify-then-replace installer; the alerts live in `UI/UpdatePrompt.swift`. Releases are made with `scripts/release.sh` from the `VERSION` file.
 - `Annotation`: annotation editor — model (`AnnotationModel`), document/undo state, renderer shared by canvas and export, AppKit canvas, editor window.
 
-`Tests/SuYanShotTests` contains non-interactive unit tests. Keep UI orchestration out of capture and storage services.
+`Tests/SuYanShotTests` contains non-interactive unit tests. With Command Line Tools only, `scripts/test-stitcher.sh` is the runnable regression test; `scripts/make-app.sh` builds a universal (arm64 + x86_64) app. Keep UI orchestration out of capture and storage services.
 
 ## Coding rules
 - Prefer current native APIs and macOS 14 availability.

@@ -17,9 +17,18 @@ cd "$ROOT"
 # The one place the version lives; scripts/release.sh tags releases with it and the app compares it with GitHub.
 VERSION="$(tr -d '[:space:]' < VERSION)"
 
-echo "→ Building release binary"
-swift build -c release --product "$EXECUTABLE"
-BIN_DIR="$(swift build -c release --show-bin-path)"
+# Universal binary: Apple Silicon + Intel. `--arch a --arch b` needs full Xcode, so build each slice
+# separately (Command Line Tools can cross-compile) and join them with lipo.
+UNIVERSAL="$ROOT/.build/app/universal"
+mkdir -p "$UNIVERSAL"
+SLICES=()
+for arch in arm64 x86_64; do
+    echo "→ Building release binary ($arch)"
+    swift build -c release --product "$EXECUTABLE" --arch "$arch" --scratch-path "$ROOT/.build/$arch"
+    SLICES+=("$(swift build -c release --arch "$arch" --scratch-path "$ROOT/.build/$arch" --show-bin-path)/$EXECUTABLE")
+done
+lipo -create "${SLICES[@]}" -output "$UNIVERSAL/$EXECUTABLE"
+BIN_DIR="$UNIVERSAL"
 
 APP="$ROOT/.build/app/$APP_NAME.app"
 rm -rf "$APP"

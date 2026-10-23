@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var phoneShareObservation: AnyCancellable?
     private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings,
                                                                 updates: updates.settings, checkForUpdates: { [weak self] in self?.updates.checkNow() })
+    private lazy var welcome = WelcomeWindowController(shortcuts: shortcutStore, clipboard: clipboard.store)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -22,7 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openClipboard: { [weak self] in self?.clipboard.togglePanel() },
             openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() },
             togglePhoneShare: { [weak self] in self?.clipboard.togglePhoneShare() },
-            checkForUpdates: { [weak self] in self?.updates.checkNow() })
+            checkForUpdates: { [weak self] in self?.updates.checkNow() },
+            openWelcome: { [weak self] in self?.welcome.show() })
         coordinator.onRecordingChange = { [weak self] recording in self?.menuBarController?.setRecording(recording) }
         phoneShareObservation = clipboard.phoneShare.$status.combineLatest(clipboard.phoneShare.$isEnabled).sink { [weak self] status, enabled in
             let note: String? = switch status {
@@ -51,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyShortcuts()
         updates.isAppBusy = { [weak self] in self?.coordinator.isRecording ?? false }
         updates.start()
+        if !WelcomeWindowController.isCompleted { welcome.show() }
     }
 
     /// Global hotkeys are paused while the settings window records a new shortcut.
@@ -272,15 +275,29 @@ final class CaptureCoordinator {
             do {
                 let windows = try await windowService.shareableWindows()
                 guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
-                windowPicker.begin(windows: windows) { [weak self] window in
+                windowPicker.begin(windows: windows, listed: try await recordableWindows()) { [weak self] window in
                     guard let self, let window else { return }
-                    let screen = self.screen(containing: window) ?? NSScreen.underMouse ?? NSScreen.main!
+                    let screen = (window.isOnScreen ? self.screen(containing: window) : nil) ?? NSScreen.underMouse ?? NSScreen.main!
                     let appName = window.owningApplication?.applicationName ?? "這個 App"
-                    self.recordingStartBar.show(region: self.cocoaFrame(of: window), on: screen, settings: self.recordingSettings,
+                    // A window on another desktop isn't where its frame says on this screen: no border then.
+                    self.recordingStartBar.show(region: window.isOnScreen ? self.cocoaFrame(of: window) : nil, on: screen, settings: self.recordingSettings,
                                                 windowAppName: appName,
                                                 onStart: { [weak self] in self?.confirmRecording(.window(window)) }, onCancel: {})
                 }
             } catch { present(error) }
+        }
+    }
+
+    /// Normal app windows, including covered ones and those on other desktops, for the window dropdown.
+    private func recordableWindows() async throws -> [SCWindow] {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        let own = ProcessInfo.processInfo.processIdentifier
+        let systemApps: Set<String> = ["com.apple.WindowManager", "com.apple.dock", "com.apple.controlcenter", "com.apple.notificationcenterui"]
+        return content.windows.filter { window in
+            guard window.windowLayer == 0, window.frame.width >= 80, window.frame.height >= 60,
+                  let app = window.owningApplication, app.processID != own, !systemApps.contains(app.bundleIdentifier),
+                  !(window.title ?? "").isEmpty else { return false }
+            return true
         }
     }
 

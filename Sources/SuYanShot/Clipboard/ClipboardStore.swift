@@ -31,10 +31,12 @@ final class ClipboardStore: ObservableObject {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         self.directory = directory ?? base.appendingPathComponent("SuYanShot/Clipboard", isDirectory: true)
         self.userDefaults = userDefaults
-        isEnabled = userDefaults.object(forKey: Keys.enabled) as? Bool ?? true
+        isEnabled = false
         limit = userDefaults.object(forKey: Keys.limit) as? Int ?? 200
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
         load()
+        // New users decide in the welcome window; people who already have history keep recording.
+        isEnabled = userDefaults.object(forKey: Keys.enabled) as? Bool ?? !items.isEmpty
     }
 
     // MARK: - Adding

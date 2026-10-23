@@ -9,6 +9,7 @@ final class MenuBarController: NSObject {
     private let openPhoneShare: () -> Void
     private let togglePhoneShare: () -> Void
     private let checkForUpdates: () -> Void
+    private let openWelcome: () -> Void
     private var phoneShareItem: NSMenuItem?
     private var isRecording = false
     private var isSharing = false
@@ -16,13 +17,15 @@ final class MenuBarController: NSObject {
     private var stopRecordingItem: NSMenuItem?
 
     init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void, openClipboard: @escaping () -> Void,
-         openPhoneShare: @escaping () -> Void, togglePhoneShare: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
+         openPhoneShare: @escaping () -> Void, togglePhoneShare: @escaping () -> Void, checkForUpdates: @escaping () -> Void,
+         openWelcome: @escaping () -> Void) {
         self.coordinator = coordinator
         self.openSettings = openSettings
         self.openClipboard = openClipboard
         self.openPhoneShare = openPhoneShare
         self.togglePhoneShare = togglePhoneShare
         self.checkForUpdates = checkForUpdates
+        self.openWelcome = openWelcome
         super.init()
         statusItem.button?.image = MenuBarIcon.image
         let menu = NSMenu()
@@ -70,6 +73,7 @@ final class MenuBarController: NSObject {
         settings.keyEquivalentModifierMask = .command
         menu.addItem(settings)
         menu.addItem(item("檢查更新…", symbol: "arrow.down.circle", action: #selector(checkUpdates)))
+        menu.addItem(item("初次設定…", symbol: "sparkles", action: #selector(showWelcome)))
         menu.addItem(.separator())
         let quit = item("結束拾光", action: #selector(quit), key: "q")
         quit.keyEquivalentModifierMask = .command
@@ -130,6 +134,7 @@ final class MenuBarController: NSObject {
     @objc private func showPhoneShare() { openPhoneShare() }
     @objc private func togglePhone() { togglePhoneShare() }
     @objc private func checkUpdates() { checkForUpdates() }
+    @objc private func showWelcome() { openWelcome() }
     @objc private func openPermissions() { PermissionsManager.openScreenCaptureSettings() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

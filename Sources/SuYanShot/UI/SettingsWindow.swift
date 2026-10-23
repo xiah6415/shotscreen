@@ -45,9 +45,14 @@ private struct SettingsView: View {
     @ObservedObject var updates: UpdateSettings
     let checkForUpdates: () -> Void
     @State private var confirmClear = false
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Toggle("開機時自動啟動", isOn: Binding(get: { launchAtLogin }, set: { LaunchAtLogin.set($0); launchAtLogin = LaunchAtLogin.isEnabled }))
+
+            Divider()
+
             Text("快捷鍵").font(.headline)
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
@@ -74,6 +79,8 @@ private struct SettingsView: View {
 
             HStack {
                 Spacer()
+                Button("改用 ⌃⇧ 組合") { store.useControlShiftDefaults() }
+                    .help("避開 macOS 的截圖鍵，以及 ⌘⇧V、⌘⇧R 這類 App 常用的組合")
                 Button("還原預設") { store.resetToDefaults() }
             }
 
