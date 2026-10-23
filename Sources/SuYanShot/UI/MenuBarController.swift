@@ -17,7 +17,7 @@ final class MenuBarController: NSObject {
         self.openClipboard = openClipboard
         self.openPhoneShare = openPhoneShare
         super.init()
-        statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "素顏 Shot")
+        statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "拾光")
         let menu = NSMenu()
         let stop = item("停止錄影", symbol: "stop.circle.fill", action: #selector(stopRecording))
         stop.isHidden = true
@@ -60,7 +60,7 @@ final class MenuBarController: NSObject {
         settings.keyEquivalentModifierMask = .command
         menu.addItem(settings)
         menu.addItem(.separator())
-        let quit = item("結束 素顏 Shot", action: #selector(quit), key: "q")
+        let quit = item("結束拾光", action: #selector(quit), key: "q")
         quit.keyEquivalentModifierMask = .command
         menu.addItem(quit)
         statusItem.menu = menu
@@ -68,7 +68,7 @@ final class MenuBarController: NSObject {
 
     /// Red menu-bar icon and a 停止錄影 item while recording.
     func setRecording(_ recording: Bool) {
-        statusItem.button?.image = NSImage(systemSymbolName: recording ? "record.circle.fill" : "camera.viewfinder", accessibilityDescription: "素顏 Shot")
+        statusItem.button?.image = NSImage(systemSymbolName: recording ? "record.circle.fill" : "camera.viewfinder", accessibilityDescription: "拾光")
         statusItem.button?.contentTintColor = recording ? .systemRed : nil
         stopRecordingItem?.isHidden = !recording
     }

@@ -1,4 +1,6 @@
-# 素顏 Shot
+# 拾光 / Glean
+
+Formerly 素顏 Shot.
 
 A private, native macOS screenshot utility for the common capture workflow: no subscription, cloud, account, or third-party framework.
 
@@ -22,7 +24,7 @@ swift run SuYanShot
 scripts/make-app.sh --install
 ```
 
-Builds a release binary, packages it as `素顏 Shot.app` (menu-bar only), installs it to `/Applications`, and launches it. Re-run after pulling changes. Add it under System Settings → General → Login Items to start at login.
+Builds a release binary, packages it as `Glean.app` (menu-bar only, shown as 拾光 on Chinese systems, with the icon from `Resources/AppIcon.png`), installs it to `/Applications`, and launches it. Re-run after pulling changes. Add it under System Settings → General → Login Items to start at login.
 
 Run `scripts/make-signing-cert.sh` once per Mac first. It creates a self-signed `SuYanShot Local Signing` identity in the login keychain; without it the app is ad-hoc signed and macOS asks for Screen Recording again after every rebuild.
 

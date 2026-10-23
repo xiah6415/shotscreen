@@ -17,7 +17,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show() {
         if window == nil {
             let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "素顏 Shot 設定"
+            window.title = "拾光設定"
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard, recording: recording))

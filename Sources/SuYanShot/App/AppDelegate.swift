@@ -182,7 +182,7 @@ final class CaptureCoordinator {
             PermissionsManager.requestAccessibility()
             let alert = NSAlert()
             alert.messageText = "自動捲動需要「輔助使用」權限"
-            alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開素顏 Shot，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"
+            alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開拾光，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"
             alert.addButton(withTitle: "打開系統設定")
             alert.addButton(withTitle: "先手動捲")
             NSApp.activate(ignoringOtherApps: true)
@@ -398,8 +398,8 @@ final class CaptureCoordinator {
 
     private func showPermissionHelp() {
         let alert = NSAlert()
-        alert.messageText = "素顏 Shot 需要「螢幕錄製」權限"
-        alert.informativeText = "到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」打開素顏 Shot。\n打開之後要重新啟動 App 才會生效。"
+        alert.messageText = "拾光需要「螢幕錄製」權限"
+        alert.informativeText = "到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」打開拾光。\n打開之後要重新啟動 App 才會生效。"
         alert.addButton(withTitle: "打開系統設定")
         alert.addButton(withTitle: "重新啟動 App")
         alert.addButton(withTitle: "取消")

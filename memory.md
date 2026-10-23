@@ -55,6 +55,8 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 
 ## In Progress
 - Manual interactive capture validation on a desktop with Screen Recording permission.
+- 2026-10-23 rename + icon: the app is now 拾光 / Glean (user's choice). `make-app.sh` builds `Glean.app` (CFBundleName/DisplayName Glean, `LSHasLocalizedDisplayName` + zh-Hant / zh_TW / zh-Hant-TW `InfoPlist.strings` → 拾光, so Finder/Launchpad/Spotlight show 拾光 on Chinese systems and Glean elsewhere; Spotlight finds both) and removes the old `/Applications/素顏 Shot.app` on install. Bundle id `local.suyanshot.app`, the SuYanShot target/executable and the signing identity are unchanged, so TCC grants carried over (designated requirement verified identical). Icon: macOS-style warm sunrise tile with white viewfinder corners and a white sparkle (draft A of three), source `Resources/AppIcon.png`, reproducible with `scripts/icon/render-icon.swift`; `make-app.sh` turns it into `AppIcon.icns` via sips + iconutil. User-facing strings changed from 素顏 Shot to 拾光 (alerts, menu 結束拾光, settings title, clipboard source name, phone page title, usage descriptions). Old clipboard entries still show source 素顏 Shot. A login item pointing at the old app must be re-added for Glean.app.
+
 
 ## TODO
 - Implement and manually validate capture workflows.

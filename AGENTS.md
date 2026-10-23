@@ -1,4 +1,4 @@
-# Agent Guide — 素顏 Shot
+# Agent Guide — 拾光 / Glean (formerly 素顏 Shot)
 
 ## Project purpose
 Personal, native macOS screenshot tool: a durable replacement for the most-used CleanShot X workflows, not a commercial clone.

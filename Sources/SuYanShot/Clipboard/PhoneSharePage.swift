@@ -8,7 +8,7 @@ enum PhoneSharePage {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>素顏 Shot 剪貼簿</title>
+<title>拾光剪貼簿</title>
 <style>
   :root {
     --bg: #f2f2f7; --card: #ffffff; --text: #1c1c1e; --muted: #8e8e93; --line: rgba(60,60,67,.12);
