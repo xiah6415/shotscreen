@@ -19,7 +19,7 @@ final class MenuBarController: NSObject {
         self.openPhoneShare = openPhoneShare
         self.checkForUpdates = checkForUpdates
         super.init()
-        statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "拾光")
+        statusItem.button?.image = MenuBarIcon.image
         let menu = NSMenu()
         let stop = item("停止錄影", symbol: "stop.circle.fill", action: #selector(stopRecording))
         stop.isHidden = true
@@ -71,7 +71,7 @@ final class MenuBarController: NSObject {
 
     /// Red menu-bar icon and a 停止錄影 item while recording.
     func setRecording(_ recording: Bool) {
-        statusItem.button?.image = NSImage(systemSymbolName: recording ? "record.circle.fill" : "camera.viewfinder", accessibilityDescription: "拾光")
+        statusItem.button?.image = recording ? NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "拾光 錄影中") : MenuBarIcon.image
         statusItem.button?.contentTintColor = recording ? .systemRed : nil
         stopRecordingItem?.isHidden = !recording
     }
