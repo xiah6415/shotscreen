@@ -16,6 +16,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - `Shortcuts`: Carbon-based global hotkey registration.
 - `Models`: value types shared between modules.
 - `Clipboard`: clipboard history (Paste-style) — model, on-disk store, pasteboard monitor, paster, and phone sharing over the local network (`PhoneShareServer` = minimal Network.framework HTTP server, `PhoneShare` = routes, `PhoneSharePage` = the mobile web page); panel UI lives in `UI/ClipboardPanel.swift`, QR window in `UI/PhoneShareWindow.swift`.
+- `Update`: GitHub Releases check (`UpdateChecker`), preferences, and the verify-then-replace installer; the alerts live in `UI/UpdatePrompt.swift`. Releases are made with `scripts/release.sh` from the `VERSION` file.
 - `Annotation`: annotation editor — model (`AnnotationModel`), document/undo state, renderer shared by canvas and export, AppKit canvas, editor window.
 
 `Tests/SuYanShotTests` contains non-interactive unit tests. Keep UI orchestration out of capture and storage services.

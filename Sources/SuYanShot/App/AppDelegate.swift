@@ -7,8 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutStore = ShortcutStore()
     private let shortcuts = ShortcutManager()
     private let clipboard = ClipboardFeature()
+    private let updates = UpdateController()
     private var menuBarController: MenuBarController?
-    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings)
+    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings,
+                                                                updates: updates.settings, checkForUpdates: { [weak self] in self?.updates.checkNow() })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -16,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator: coordinator,
             openSettings: { [weak self] in self?.settings.show() },
             openClipboard: { [weak self] in self?.clipboard.togglePanel() },
-            openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() })
+            openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() },
+            checkForUpdates: { [weak self] in self?.updates.checkNow() })
         coordinator.onRecordingChange = { [weak self] recording in self?.menuBarController?.setRecording(recording) }
         shortcuts.onAction = { [weak self] action in
             switch action {
@@ -32,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
         applyShortcuts()
+        updates.isAppBusy = { [weak self] in self?.coordinator.isRecording ?? false }
+        updates.start()
     }
 
     /// Global hotkeys are paused while the settings window records a new shortcut.

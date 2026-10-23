@@ -7,15 +7,17 @@ final class MenuBarController: NSObject {
     private let openSettings: () -> Void
     private let openClipboard: () -> Void
     private let openPhoneShare: () -> Void
+    private let checkForUpdates: () -> Void
     private var actionItems: [ShortcutAction: NSMenuItem] = [:]
     private var stopRecordingItem: NSMenuItem?
 
     init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void, openClipboard: @escaping () -> Void,
-         openPhoneShare: @escaping () -> Void) {
+         openPhoneShare: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
         self.coordinator = coordinator
         self.openSettings = openSettings
         self.openClipboard = openClipboard
         self.openPhoneShare = openPhoneShare
+        self.checkForUpdates = checkForUpdates
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "拾光")
         let menu = NSMenu()
@@ -59,6 +61,7 @@ final class MenuBarController: NSObject {
         let settings = item("設定…", symbol: "gearshape", action: #selector(showSettings), key: ",")
         settings.keyEquivalentModifierMask = .command
         menu.addItem(settings)
+        menu.addItem(item("檢查更新…", symbol: "arrow.down.circle", action: #selector(checkUpdates)))
         menu.addItem(.separator())
         let quit = item("結束拾光", action: #selector(quit), key: "q")
         quit.keyEquivalentModifierMask = .command
@@ -102,6 +105,7 @@ final class MenuBarController: NSObject {
     @objc private func showSettings() { openSettings() }
     @objc private func showClipboard() { openClipboard() }
     @objc private func showPhoneShare() { openPhoneShare() }
+    @objc private func checkUpdates() { checkForUpdates() }
     @objc private func openPermissions() { PermissionsManager.openScreenCaptureSettings() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

@@ -12,10 +12,10 @@ DISPLAY_NAME_ZH="拾光"
 OLD_APP_NAMES=("素顏 Shot")
 EXECUTABLE="SuYanShot"
 BUNDLE_ID="local.suyanshot.app"
-VERSION="0.1.0"
-
 ROOT="${0:A:h:h}"
 cd "$ROOT"
+# The one place the version lives; scripts/release.sh tags releases with it and the app compares it with GitHub.
+VERSION="$(tr -d '[:space:]' < VERSION)"
 
 echo "→ Building release binary"
 swift build -c release --product "$EXECUTABLE"
