@@ -141,10 +141,13 @@ final class CaptureCoordinator {
             do {
                 let windows = try await windowService.shareableWindows()
                 guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
-                windowPicker.begin(windows: windows) { [weak self] window in
-                    guard let self, let window else { return }
+                windowPicker.begin(windows: windows, listed: try await recordableWindows(), gridTitle: "選擇要截圖的視窗") { [weak self] picked in
+                    guard let self, let picked else { return }
                     Task { @MainActor in
-                        do { self.finish(try await self.windowService.capture(window)) } catch { self.present(error) }
+                        do {
+                            guard let window = try await self.bringOnScreen(picked) else { return }
+                            self.finish(try await self.windowService.capture(window))
+                        } catch { self.present(error) }
                     }
                 }
             } catch { present(error) }
@@ -275,17 +278,37 @@ final class CaptureCoordinator {
             do {
                 let windows = try await windowService.shareableWindows()
                 guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
-                windowPicker.begin(windows: windows, listed: try await recordableWindows()) { [weak self] window in
-                    guard let self, let window else { return }
-                    let screen = (window.isOnScreen ? self.screen(containing: window) : nil) ?? NSScreen.underMouse ?? NSScreen.main!
-                    let appName = window.owningApplication?.applicationName ?? "這個 App"
-                    // A window on another desktop isn't where its frame says on this screen: no border then.
-                    self.recordingStartBar.show(region: window.isOnScreen ? self.cocoaFrame(of: window) : nil, on: screen, settings: self.recordingSettings,
-                                                windowAppName: appName,
-                                                onStart: { [weak self] in self?.confirmRecording(.window(window)) }, onCancel: {})
+                windowPicker.begin(windows: windows, listed: try await recordableWindows(), gridTitle: "選擇要錄的視窗") { [weak self] picked in
+                    guard let self, let picked else { return }
+                    Task { @MainActor in
+                        guard let window = try? await self.bringOnScreen(picked) else { return }
+                        let screen = self.screen(containing: window) ?? NSScreen.underMouse ?? NSScreen.main!
+                        let appName = window.owningApplication?.applicationName ?? "這個 App"
+                        self.recordingStartBar.show(region: self.cocoaFrame(of: window), on: screen, settings: self.recordingSettings,
+                                                    windowAppName: appName,
+                                                    onStart: { [weak self] in self?.confirmRecording(.window(window)) }, onCancel: {})
+                    }
                 }
             } catch { present(error) }
         }
+    }
+
+    /// macOS can't capture windows on another desktop or minimized. For those, bring the app forward (which switches
+    /// to its desktop) and wait for the window to show up; a minimized window stays hidden, so explain instead.
+    private func bringOnScreen(_ window: SCWindow) async throws -> SCWindow? {
+        if window.isOnScreen { return window }
+        if let app = window.owningApplication { NSRunningApplication(processIdentifier: app.processID)?.activate() }
+        for _ in 0..<10 {
+            try await Task.sleep(for: .milliseconds(200))
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            if let shown = content.windows.first(where: { $0.windowID == window.windowID }) { return shown }
+        }
+        let alert = NSAlert()
+        alert.messageText = "「\(window.title ?? "這個視窗")」現在不在畫面上"
+        alert.informativeText = "它可能被縮小到 Dock 了。請先把它打開，再重新選一次。"
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        return nil
     }
 
     /// Normal app windows, including covered ones and those on other desktops, for the window dropdown.

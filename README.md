@@ -30,7 +30,7 @@ A native macOS menu-bar tool for screenshots, scrolling captures, screen recordi
 |---|---|
 | All-in-One（框選後選截圖、捲動截圖、錄影；Tab 切換截圖／錄影） | ⌘⇧5 |
 | 框選截圖 | ⌘⇧1 |
-| 視窗截圖 | ⌘⇧2 |
+| 視窗截圖（游標點選，或按空白鍵用縮圖一次看所有視窗） | ⌘⇧2 |
 | 全螢幕截圖 | ⌘⇧3 |
 | 延遲截圖（3 秒） | ⌘⇧4 |
 | 捲動截圖（可自動捲動，每段會停下來問要不要繼續） | ⌘⇧6 |

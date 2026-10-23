@@ -3,7 +3,8 @@ import ScreenCaptureKit
 import SwiftUI
 
 /// Hover-to-highlight window picker: the window under the pointer is highlighted, click captures it, Esc cancels.
-/// With `listed` windows it also shows a dropdown, so covered windows or ones on other desktops can be chosen by name.
+/// With `listed` windows it also offers a dropdown and an all-windows thumbnail overview (Space), so covered windows
+/// or ones on other desktops can be chosen too.
 @MainActor
 final class WindowPicker: NSObject {
     struct Candidate {
@@ -15,10 +16,17 @@ final class WindowPicker: NSObject {
     private var panels: [OverlayPanel] = []
     private var candidates: [Candidate] = []
     private var completion: ((SCWindow?) -> Void)?
+    private var listed: [SCWindow] = []
+    private var gridTitle = ""
+    private let grid = WindowGrid()
 
-    func begin(windows: [SCWindow], listed: [SCWindow] = [], completion: @escaping (SCWindow?) -> Void) {
+    func begin(windows: [SCWindow], listed: [SCWindow] = [], gridTitle: String = "選擇視窗", completion: @escaping (SCWindow?) -> Void) {
         finish(nil)
         self.completion = completion
+        self.listed = listed
+        self.gridTitle = gridTitle
+        grid.onPick = { [weak self] window in self?.finish(window) }
+        grid.onClose = { [weak self] in self?.mainPanel?.makeKey() }
         candidates = Self.frontToBack(windows)
         NSApp.activate(ignoringOtherApps: true)
         panels = NSScreen.screens.map { screen in
@@ -32,6 +40,7 @@ final class WindowPicker: NSObject {
         if !listed.isEmpty, let view = main?.contentView {
             let bar = NSHostingView(rootView: WindowListBar(windows: listed,
                                                             onPick: { [weak self] window in self?.finish(window) },
+                                                            onShowAll: { [weak self] in self?.showGrid() },
                                                             onCancel: { [weak self] in self?.cancel() }))
             let size = bar.fittingSize
             bar.frame = CGRect(x: (view.bounds.width - size.width) / 2, y: view.bounds.height - size.height - 60, width: size.width, height: size.height)
@@ -45,6 +54,14 @@ final class WindowPicker: NSObject {
         panels.forEach { ($0.contentView as? WindowHighlightView)?.hovered = hovered }
     }
 
+    private var mainPanel: OverlayPanel? { panels.first { $0.screen == NSScreen.underMouse } ?? panels.first }
+
+    /// The thumbnail overview of every listed window.
+    fileprivate func showGrid() {
+        guard !listed.isEmpty, let screen = mainPanel?.screen ?? NSScreen.underMouse else { return }
+        grid.show(windows: listed, title: gridTitle, on: screen)
+    }
+
     fileprivate func pick() { finish(candidate(at: NSEvent.mouseLocation)?.window) }
     fileprivate func cancel() { finish(nil) }
 
@@ -52,6 +69,7 @@ final class WindowPicker: NSObject {
 
     private func finish(_ window: SCWindow?) {
         guard let completion else { return }
+        grid.close()
         panels.forEach { $0.orderOut(nil) }
         panels = []
         candidates = []
@@ -124,13 +142,20 @@ private final class WindowHighlightView: NSView {
     }
     override func mouseDown(with event: NSEvent) { picker?.pick() }
     override func rightMouseDown(with event: NSEvent) { picker?.cancel() }
-    override func keyDown(with event: NSEvent) { if event.keyCode == 53 { picker?.cancel() } }
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 53: picker?.cancel()
+        case 49: picker?.showGrid() // Space
+        default: super.keyDown(with: event)
+        }
+    }
 }
 
 /// 「或從清單選」: every shareable window grouped by app, including covered ones and those on other desktops.
 private struct WindowListBar: View {
     let windows: [SCWindow]
     let onPick: (SCWindow) -> Void
+    let onShowAll: () -> Void
     let onCancel: () -> Void
 
     private var groups: [(app: String, windows: [SCWindow])] {
@@ -142,7 +167,9 @@ private struct WindowListBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "macwindow").foregroundStyle(.secondary)
-            Text("把游標移到視窗上點一下，或從清單選：").font(.system(size: 13))
+            Text("把游標移到視窗上點一下，或").font(.system(size: 13))
+            Button(action: onShowAll) { Label("顯示所有視窗", systemImage: "square.grid.2x2") }
+                .help("用縮圖一次看所有視窗（空白鍵）")
             Menu("選擇視窗") {
                 ForEach(groups, id: \.app) { group in
                     Section(group.app) {
@@ -162,6 +189,6 @@ private struct WindowListBar: View {
 
     private func title(of window: SCWindow) -> String {
         let name = window.title?.isEmpty == false ? window.title! : "（沒有標題）"
-        return window.isOnScreen ? name : "\(name)（在其他桌面或被縮小）"
+        return window.isOnScreen ? name : "\(name)（在其他桌面或被縮小，選了會先切過去）"
     }
 }
