@@ -56,7 +56,7 @@ echo "── Release notes ──"; cat "$NOTES"; echo "────────
 
 if $DRY_RUN; then echo "✓ Dry run: nothing published"; exit 0; fi
 
-read -q "REPLY?Publish $TAG to github.com/$REPO? [y/N] " || { echo; echo "Cancelled"; exit 1; }
-echo
+read "REPLY?Publish $TAG to github.com/$REPO? [y/N] " || true
+[[ "$REPLY" == [yY]* ]] || { echo "Cancelled"; exit 1; }
 gh release create "$TAG" "$ZIP" --repo "$REPO" --target "$(git rev-parse HEAD)" --title "拾光 Glean $VERSION" --notes-file "$NOTES"
 echo "✓ Published $TAG"
