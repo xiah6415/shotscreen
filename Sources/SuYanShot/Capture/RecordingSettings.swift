@@ -18,7 +18,7 @@ final class RecordingSettings: ObservableObject {
         self.defaults = defaults
         frameRate = defaults.object(forKey: "recordingFrameRate") as? Int ?? 30
         showsCursor = defaults.object(forKey: "recordingShowsCursor") as? Bool ?? true
-        systemAudio = defaults.object(forKey: "recordingSystemAudio") as? Bool ?? false
+        systemAudio = defaults.object(forKey: "recordingSystemAudio") as? Bool ?? true
         microphone = defaults.object(forKey: "recordingMicrophone") as? Bool ?? false
         countdown = defaults.object(forKey: "recordingCountdown") as? Bool ?? true
     }

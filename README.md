@@ -41,7 +41,7 @@ Grant **Screen Recording** access when macOS asks, then relaunch the app if need
 - Scroll capture: select a region, scroll down by hand (or turn on auto scroll, which stops every few screens to ask before continuing), and the frames are stitched into one tall image, with a live preview beside the region
 - Clipboard history (⌘⇧V): text, rich text, images and files, searchable cards along the bottom of the screen, filters (常用 / 文字 / 圖片 / 檔案) and custom tags, paste straight into the current app; stored locally, skips password-manager content
 - Phone access (在手機上開啟…): scan a QR code to browse, search and copy the clipboard history in the phone's browser on the same Wi-Fi, and send text or photos back to the Mac; token-protected, local network only, stops after 30 idle minutes
-- Screen recording (⌘⇧R, menu 錄影, All-in-One R): region or full screen to MP4 on the Desktop, optional system audio / microphone / cursor, 30 or 60 fps, pause/resume, countdown; preview card with Show in Finder, copy file, and GIF export
+- Screen recording (⌘⇧R, menu 錄影, All-in-One R): region or full screen to MP4 on the Desktop, system audio (on by default) and microphone toggles right before it starts, optional cursor, 30 or 60 fps, pause/resume, countdown; preview card with Show in Finder, copy file, and GIF export
 - Annotation editor: arrows, boxes, ellipses, lines, pen, highlighter, text, numbered steps, pixelate, undo/redo
 - Global hotkeys for region, window, full screen, and delayed capture, customizable in 設定… (⌘,)
 

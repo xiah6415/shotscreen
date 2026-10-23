@@ -60,6 +60,7 @@ final class CaptureCoordinator {
     let recordingSettings = RecordingSettings()
     private var recorder: ScreenRecorder?
     private let recordingHUD = RecordingHUD()
+    private let recordingStartBar = RecordingStartBar()
     private lazy var recordingPreview = RecordingPreviewController()
     /// Called with true when a recording starts and false when it ends.
     var onRecordingChange: ((Bool) -> Void)?
@@ -233,13 +234,18 @@ final class CaptureCoordinator {
         startRecording(on: screen, selection: nil)
     }
 
+    /// Shows the start bar (sound toggles, 開始錄影) first; recording begins after 開始錄影 and the optional countdown.
     private func startRecording(on screen: NSScreen, selection: RegionSelection?) {
         guard !isRecording else { return }
         let begin = { [weak self] in
             guard let self else { return }
             Task { @MainActor in await self.beginRecording(on: screen, selection: selection) }
         }
-        if recordingSettings.countdown { countdown.start(seconds: 3, completion: begin) } else { begin() }
+        let region = selection.map { $0.rectInScreenPoints.offsetBy(dx: $0.screen.frame.minX, dy: $0.screen.frame.minY) }
+        recordingStartBar.show(region: region, on: screen, settings: recordingSettings, onStart: { [weak self] in
+            guard let self else { return }
+            if self.recordingSettings.countdown { self.countdown.start(seconds: 3, completion: begin) } else { begin() }
+        }, onCancel: {})
     }
 
     private func beginRecording(on screen: NSScreen, selection: RegionSelection?) async {
