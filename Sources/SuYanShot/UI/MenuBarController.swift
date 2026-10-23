@@ -7,16 +7,21 @@ final class MenuBarController: NSObject {
     private let openSettings: () -> Void
     private let openClipboard: () -> Void
     private let openPhoneShare: () -> Void
+    private let togglePhoneShare: () -> Void
     private let checkForUpdates: () -> Void
+    private var phoneShareItem: NSMenuItem?
+    private var isRecording = false
+    private var isSharing = false
     private var actionItems: [ShortcutAction: NSMenuItem] = [:]
     private var stopRecordingItem: NSMenuItem?
 
     init(coordinator: CaptureCoordinator, openSettings: @escaping () -> Void, openClipboard: @escaping () -> Void,
-         openPhoneShare: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
+         openPhoneShare: @escaping () -> Void, togglePhoneShare: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
         self.coordinator = coordinator
         self.openSettings = openSettings
         self.openClipboard = openClipboard
         self.openPhoneShare = openPhoneShare
+        self.togglePhoneShare = togglePhoneShare
         self.checkForUpdates = checkForUpdates
         super.init()
         statusItem.button?.image = MenuBarIcon.image
@@ -54,7 +59,10 @@ final class MenuBarController: NSObject {
         menu.addItem(.separator())
         actionItems[.clipboard] = item("剪貼簿紀錄", symbol: "doc.on.clipboard", action: #selector(showClipboard))
         menu.addItem(actionItems[.clipboard]!)
-        menu.addItem(item("在手機上開啟…", symbol: "iphone", action: #selector(showPhoneShare)))
+        let phoneShare = item("手機分享", symbol: "iphone", action: #selector(togglePhone))
+        menu.addItem(phoneShare)
+        phoneShareItem = phoneShare
+        menu.addItem(item("手機分享設定…", symbol: "qrcode", action: #selector(showPhoneShare)))
         menu.addItem(.separator())
         menu.addItem(item("打開截圖資料夾", symbol: "folder", action: #selector(openFolder)))
         menu.addItem(item("權限設定…", symbol: "lock.shield", action: #selector(openPermissions)))
@@ -71,9 +79,24 @@ final class MenuBarController: NSObject {
 
     /// Red menu-bar icon and a 停止錄影 item while recording.
     func setRecording(_ recording: Bool) {
-        statusItem.button?.image = recording ? NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "拾光 錄影中") : MenuBarIcon.image
+        isRecording = recording
+        refreshIcon()
         statusItem.button?.contentTintColor = recording ? .systemRed : nil
         stopRecordingItem?.isHidden = !recording
+    }
+
+    /// Check mark on 手機分享, its status in the title, and a dot on the menu-bar icon while phones can connect.
+    func setPhoneShare(enabled: Bool, serving: Bool, note: String?) {
+        phoneShareItem?.state = enabled ? .on : .off
+        phoneShareItem?.title = note.map { "手機分享（\($0)）" } ?? "手機分享"
+        isSharing = serving
+        refreshIcon()
+    }
+
+    private func refreshIcon() {
+        statusItem.button?.image = isRecording
+            ? NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "拾光 錄影中")
+            : (isSharing ? MenuBarIcon.sharingImage : MenuBarIcon.image)
     }
 
     /// Shows the user's global shortcuts next to the matching menu items.
@@ -105,6 +128,7 @@ final class MenuBarController: NSObject {
     @objc private func showSettings() { openSettings() }
     @objc private func showClipboard() { openClipboard() }
     @objc private func showPhoneShare() { openPhoneShare() }
+    @objc private func togglePhone() { togglePhoneShare() }
     @objc private func checkUpdates() { checkForUpdates() }
     @objc private func openPermissions() { PermissionsManager.openScreenCaptureSettings() }
     @objc private func quit() { NSApp.terminate(nil) }

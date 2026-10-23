@@ -27,6 +27,12 @@ final class ClipboardFeature {
 
     func showPhoneShare() { phoneShareWindow.show() }
 
+    /// The menu switch. Turning it on without a password opens the settings so one can be set.
+    func togglePhoneShare() {
+        phoneShare.setEnabled(!phoneShare.isEnabled)
+        if phoneShare.isEnabled, !phoneShare.auth.hasPassword { phoneShareWindow.show() }
+    }
+
     private func paste(_ item: ClipboardItem, plainText: Bool) {
         monitor.ignore(changeCount: Paster.write(item, from: store, plainText: plainText))
         store.bump(item.id)

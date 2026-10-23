@@ -14,6 +14,19 @@ enum MenuBarIcon {
         return image
     }()
 
+    /// The icon with a small dot beside it: phone sharing is on and reachable.
+    static let sharingImage: NSImage = {
+        let image = NSImage(size: NSSize(width: 23, height: 18), flipped: false) { rect in
+            draw(in: CGRect(x: 0, y: 0, width: 18, height: 18))
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: CGRect(x: 19, y: 12.5, width: 4, height: 4)).fill()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "拾光（手機分享中）"
+        return image
+    }()
+
     /// Same geometry as Resources/AppIcon.png, scaled to an 18 pt square.
     private static func draw(in rect: CGRect) {
         let frame = rect.insetBy(dx: 1.5, dy: 1.5)

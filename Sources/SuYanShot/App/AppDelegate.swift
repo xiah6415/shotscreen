@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ScreenCaptureKit
 
 @MainActor
@@ -9,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clipboard = ClipboardFeature()
     private let updates = UpdateController()
     private var menuBarController: MenuBarController?
+    private var phoneShareObservation: AnyCancellable?
     private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings,
                                                                 updates: updates.settings, checkForUpdates: { [weak self] in self?.updates.checkNow() })
 
@@ -19,8 +21,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] in self?.settings.show() },
             openClipboard: { [weak self] in self?.clipboard.togglePanel() },
             openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() },
+            togglePhoneShare: { [weak self] in self?.clipboard.togglePhoneShare() },
             checkForUpdates: { [weak self] in self?.updates.checkNow() })
         coordinator.onRecordingChange = { [weak self] recording in self?.menuBarController?.setRecording(recording) }
+        phoneShareObservation = clipboard.phoneShare.$status.combineLatest(clipboard.phoneShare.$isEnabled).sink { [weak self] status, enabled in
+            let note: String? = switch status {
+            case .running: "分享中"
+            case .otherNetwork: "暫停：不在允許的網路"
+            case .needsPassword: "要先設定密碼"
+            case .noNetwork: "等待網路"
+            case .failed: "無法啟動"
+            case .off, .starting: nil
+            }
+            self?.menuBarController?.setPhoneShare(enabled: enabled, serving: status == .running, note: enabled ? note : nil)
+        }
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()

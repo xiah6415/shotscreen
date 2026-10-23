@@ -1,5 +1,6 @@
 /// The single-page web app the phone opens. Everything it shows is built with textContent (never innerHTML)
-/// because clipboard text is arbitrary and may contain markup.
+/// because clipboard text is arbitrary and may contain markup. The session lives in an HttpOnly cookie set by
+/// the login page, so URLs carry no secret.
 enum PhoneSharePage {
     static let html = #"""
 <!doctype html>
@@ -8,6 +9,9 @@ enum PhoneSharePage {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="拾光">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>拾光剪貼簿</title>
 <style>
   :root {
@@ -61,7 +65,7 @@ enum PhoneSharePage {
 </head>
 <body>
 <header>
-  <h1>剪貼簿</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between"><h1>剪貼簿</h1><button id="logout" class="chip">登出</button></div>
   <input id="search" type="search" placeholder="搜尋" autocomplete="off">
   <div id="chips"></div>
 </header>
@@ -77,13 +81,15 @@ enum PhoneSharePage {
 <div id="toast"></div>
 <div id="viewer"><img alt=""><p>長按圖片可以儲存或複製・點一下關閉</p></div>
 <script>
-const token = new URLSearchParams(location.search).get('t') || '';
 const state = { items: [], tags: [], version: '', filter: 'all', query: '', expired: false };
 const $ = (id) => document.getElementById(id);
 
-function api(path, options = {}) {
-  const sep = path.includes('?') ? '&' : '?';
-  return fetch(path + sep + 't=' + encodeURIComponent(token), options);
+// The session cookie goes along automatically; POSTs also carry a header cross-site forms can't add.
+async function api(path, options = {}) {
+  const headers = Object.assign({ 'X-Requested-With': 'glean' }, options.headers || {});
+  const response = await fetch(path, Object.assign({}, options, { headers, credentials: 'same-origin' }));
+  if (response.status === 401) { location.reload(); throw new Error('signed out'); }
+  return response;
 }
 
 function el(tag, className, text) {
@@ -106,16 +112,11 @@ async function load() {
   if (state.expired) return;
   try {
     const response = await api('/api/items?v=' + encodeURIComponent(state.version));
-    if (response.status === 403) { state.expired = true; showExpired(); return; }
     const data = await response.json();
     if (!data.unchanged) { state.items = data.items; state.tags = data.tags; state.version = data.version; render(); }
   } catch (e) { /* Mac asleep or off the network; try again on the next tick */ }
 }
 
-function showExpired() {
-  const list = $('list');
-  list.replaceChildren(el('div', 'empty', '連結已失效或分享已停止。請在 Mac 上重新打開「在手機上開啟」並掃描 QR code。'));
-}
 
 const builtIn = [['all', '全部'], ['favorites', '常用'], ['text', '文字'], ['image', '圖片'], ['file', '檔案']];
 const kindNames = { text: '文字', richText: '格式文字', image: '圖片', file: '檔案' };
@@ -181,7 +182,7 @@ function card(item) {
   if (item.kind === 'image') {
     const img = el('img', 'thumb');
     img.loading = 'lazy';
-    img.src = '/api/items/' + item.id + '/image?thumb=1&t=' + encodeURIComponent(token);
+    img.src = '/api/items/' + item.id + '/image?thumb=1';
     img.onclick = () => openViewer(item);
     c.append(img);
   } else if (item.kind === 'file') {
@@ -244,7 +245,7 @@ function copyText(item) {
 
 function openViewer(item) {
   const viewer = $('viewer');
-  viewer.querySelector('img').src = '/api/items/' + item.id + '/image?t=' + encodeURIComponent(token);
+  viewer.querySelector('img').src = '/api/items/' + item.id + '/image';
   viewer.classList.add('show');
 }
 $('viewer').onclick = (e) => { if (e.target.tagName !== 'IMG') $('viewer').classList.remove('show'); };
@@ -270,9 +271,74 @@ $('file').onchange = async (e) => {
   if (r.ok) { toast('已傳到 Mac'); state.version = ''; load(); } else { toast('傳送失敗'); }
 };
 
+$('logout').onclick = async () => {
+  if (!confirm('要登出這台裝置嗎？下次要重新輸入密碼。')) return;
+  await api('/api/logout', { method: 'POST' }).catch(() => {});
+  location.reload();
+};
+
 load();
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, 5000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
+</script>
+</body>
+</html>
+"""#
+
+    /// Shown until this device signs in. Works the same on every Mac running 拾光, so one Home Screen shortcut fits all.
+    static let loginHTML = #"""
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="拾光">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>登入拾光</title>
+<style>
+  :root { --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --muted: #8e8e93; --accent: #ff7a59; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text);
+         font: 16px -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; padding: 24px; }
+  form { width: 100%; max-width: 340px; background: var(--card); border-radius: 18px; padding: 28px 22px; display: grid; gap: 14px; text-align: center; }
+  img { width: 72px; height: 72px; margin: 0 auto; border-radius: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  input { font-size: 17px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(128,128,128,.3); background: transparent; color: var(--text); width: 100%; }
+  button { font-size: 17px; font-weight: 600; padding: 12px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; }
+  #error { color: #ff453a; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<form id="form" autocomplete="on">
+  <img src="/apple-touch-icon.png" alt="">
+  <h1>拾光剪貼簿</h1>
+  <p>輸入你在 Mac 上「手機分享設定」設的密碼。這台裝置之後就不用再輸入。</p>
+  <input id="password" type="password" autocomplete="current-password" placeholder="密碼" required>
+  <input id="device" type="text" autocomplete="off" placeholder="這台裝置的名字（例如：我的 iPhone）">
+  <button type="submit">登入</button>
+  <p id="error"></p>
+</form>
+<script>
+const guess = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android 手機' : '瀏覽器';
+document.getElementById('device').value = guess;
+document.getElementById('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const error = document.getElementById('error');
+  error.textContent = '';
+  try {
+    const r = await fetch('/api/login', { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'glean' },
+      body: JSON.stringify({ password: document.getElementById('password').value, device: document.getElementById('device').value }) });
+    const data = await r.json();
+    if (data.ok) { location.replace('/'); return; }
+    if (data.error === 'locked') error.textContent = '錯太多次了，請 ' + data.seconds + ' 秒後再試。';
+    else error.textContent = '密碼不對' + (data.remaining > 0 ? '，還可以再試 ' + data.remaining + ' 次。' : '。');
+  } catch (err) { error.textContent = '連不到 Mac，請確認 Mac 開著、拾光的手機分享有打開，而且在同一個網路。'; }
+};
 </script>
 </body>
 </html>

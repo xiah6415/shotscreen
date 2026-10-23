@@ -63,7 +63,7 @@ Grant **Screen Recording** access when macOS asks, then relaunch the app if need
 - All-in-One (⌘⇧5): select and adjust a region, then capture it, start a scroll capture, or switch to window / full screen
 - Scroll capture: select a region, scroll down by hand (or turn on auto scroll, which stops every few screens to ask before continuing), and the frames are stitched into one tall image, with a live preview beside the region
 - Clipboard history (⌘⇧V): text, rich text, images and files, searchable cards along the bottom of the screen, filters (常用 / 文字 / 圖片 / 檔案) and custom tags, paste straight into the current app; stored locally, skips password-manager content
-- Phone access (在手機上開啟…): scan a QR code to browse, search and copy the clipboard history in the phone's browser on the same Wi-Fi, and send text or photos back to the Mac; token-protected, local network only, stops after 30 idle minutes
+- Phone access (menu 手機分享 switch, 手機分享設定…): open `http://glean.local:8765` on a phone on the same network to browse, search and copy the clipboard history and send text or photos back; password login per device (revocable), only on networks you allow, add it to the Home Screen as an app
 - Screen recording (⌘⇧R or All-in-One 錄影 mode; menu 錄影): adjustable region, a single window, or full screen to MP4; sound from all apps or only one chosen app on the Desktop, system audio (on by default) and microphone toggles right before it starts, optional cursor, 30 or 60 fps, pause/resume, countdown; preview card with Show in Finder, copy file, and GIF export
 - Annotation editor: arrows, boxes, ellipses, lines, pen, highlighter, text, numbered steps, pixelate, undo/redo
 - Global hotkeys for region, window, full screen, and delayed capture, customizable in 設定… (⌘,)
