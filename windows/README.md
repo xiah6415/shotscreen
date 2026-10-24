@@ -38,11 +38,12 @@ dotnet publish src/SuYanShot -c Release -r win-x64 --self-contained false -p:Pub
 
 | Feature | Default shortcut | macOS equivalent |
 | --- | --- | --- |
-| All-in-One: drag a region, adjust it (move, 8 handles, flips past the opposite edge), then 截圖 (Enter / double-click), 視窗 or 全螢幕 from the toolbar; Esc / right-click cancels | Ctrl+Shift+5 | ⌘⇧5 |
+| All-in-One: drag a region, adjust it (move, 8 handles, flips past the opposite edge), then 截圖 (Enter / double-click), 捲動截圖 (S), 視窗 or 全螢幕 from the toolbar; Esc / right-click cancels | Ctrl+Shift+5 | ⌘⇧5 |
 | 框選截圖: drag a region on a frozen copy of the screen; Esc / right-click cancels; size label and crosshair guides | Ctrl+Shift+1 | ⌘⇧1 |
 | 視窗截圖: hover highlights the front-most window, click captures it (even where other windows cover it) | Ctrl+Shift+2 | ⌘⇧2 |
 | 全螢幕截圖: the monitor under the pointer | Ctrl+Shift+3 | ⌘⇧3 |
 | 延遲截圖: 3 / 5 / 10 s countdown (click the countdown to cancel), then full screen | Ctrl+Shift+4 (3 s) | ⌘⇧4 |
+| 捲動截圖: select a region, scroll down (or turn on 自動捲動); frames are stitched into one tall image. Pressing the shortcut again finishes | Ctrl+Shift+6 | ⌘⇧6 |
 
 Every capture is copied to the clipboard (bitmap + PNG) and shown on a preview card in the bottom-right corner:
 hover for 複製 / 標註 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click (or 標註) to open the
@@ -51,6 +52,25 @@ The card closes after 8 s unless hovered. Saved files go to the Desktop as `Scre
 naming as macOS.
 
 Tray menu also has 剪貼簿紀錄, 手機分享 (switch), 手機分享設定…, 打開截圖資料夾 and 設定….
+
+### 捲動截圖 (scroll capture)
+
+Same flow as macOS. After selecting a region, a dashed border appears just outside it, a control bar below it (自動捲動 /
+暫停 / 繼續往下, 取消, 完成) and a live preview of the stitched-so-far image beside it; none of them take focus or appear in the
+frames. The region is captured every 100 ms (200 ms while auto scrolling) and `Capture/ScrollStitcher.cs` — a port of the
+macOS stitcher with the same thresholds — matches each frame against the last one: 96-column grayscale row signatures
+(rightmost 4% ignored for overlay scrollbars), sticky top/bottom bars detected and shown once, a coarse 1/4-height search
+refined at full resolution, unmatched frames skipped rather than guessed, scrolling down only, 40,000 px cap.
+
+One Windows-only addition (`Disambiguate`): when the compared overlap is entirely blank, blank rows just above the footer
+are compared too before picking an offset, so a long empty stretch can only lose or repeat blank rows, never content.
+The ported synthetic test found the macOS stitcher dropping a 14 px text line next to a blank stretch (seed 7, normal mode,
+with this test's random generator); the macOS stitcher may want the same change.
+
+自動捲動 sends mouse-wheel notches to the window under the region (the pointer is moved to its centre), learns how many pixels
+a notch moves in that app from the stitched offsets, aims for ~35% of the region per frame, shrinks the step after a
+rejected frame, tries the other direction once if nothing ever moved, pauses every ~3 region heights to ask 要繼續嗎？, and
+stops with 已經到底了 after 4 frames without movement. No permission is needed; apps running as administrator ignore it.
 
 ### 標註 (annotation editor)
 
@@ -129,6 +149,8 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - `Capture/SelectionOverlay.cs` — one overlay per monitor for region and window selection.
 - `Capture/WindowList.cs` — visible top-level windows in z-order.
 - `Capture/AllInOneSelector.cs` — the All-in-One overlay (adjustable region and its toolbar).
+- `Capture/ScrollStitcher.cs`, `Capture/ScrollCapture.cs`, `UI/ScrollCaptureHud.cs` — scroll capture: stitcher, capture loop
+  with auto scroll, and the border / control bar / preview windows.
 - `Annotation/` (namespace `SuYanShot.Annotations`) — model, renderer + pixelate/blur effects, editor state with undo,
   canvas, and the editor window with its code-drawn toolbar.
 - `Shortcuts/` — `RegisterHotKey` wrapper, shortcut parsing and the JSON store.
@@ -163,22 +185,26 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 54 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 71 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; phone sharing over loopback (status for off / no password / other network /
   no network / allowed, settings persisted; login page and public routes, X-Requested-With guard, wrong password count, cookie
   attributes, hashed-only storage, every route signed in, forged cookie, logout, five-failure lockout, password change signing
   everyone out); mDNS name sanitising, query/answer round trip and compressed names; All-in-One resizing; annotation state and
-  renderer.
+  renderer; the macOS synthetic stitcher test ported (8 seeds × normal / edge mode: every frame with content in the overlap gets
+  the exact offset, sticky bars appear once, content rows match the ground truth row for row; ~20 ms per 1000×800 frame).
 - Checked by hand on this PC (2026-10-24): Windows' own resolver (`Resolve-DnsName`) found the name published by the responder
   at this PC's address, and with a simulated device already owning the name the responder backed off to `-2`.
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
+- Scroll capture, checked by hand on this PC (2026-10-24): auto scroll on a 6,400 px test window stitched 6,396 px (the
+  region is a few pixels shorter than the window) through three checkpoints and stopped at the end, three runs in a row; the
+  seams were checked by eye. One earlier run stopped after two frames, probably because the test window was not yet in front.
 - Tried by the user: capture, settings window, clipboard history and the earlier token-based phone page (2026-10-21).
-- Not yet tried by the user: the rename, `glean.local` with password login from a real phone, All-in-One, annotation editor.
+- Not yet tried by the user: the rename, `glean.local` with password login from a real phone, All-in-One, annotation editor,
+  scroll capture.
 
 ## Not yet ported
 
-Scroll capture (the stitching algorithm in `Capture/ScrollStitcher.swift` should be ported as-is and tested against
-the same synthetic cases described in `memory.md`), screen recording / GIF, and the 錄影 section of the settings window. Both will also add their
-buttons (捲動截圖, 錄影) to the All-in-One toolbar.
+Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), the window picker's
+thumbnail grid, update checking, and the first-run 初次設定 window.

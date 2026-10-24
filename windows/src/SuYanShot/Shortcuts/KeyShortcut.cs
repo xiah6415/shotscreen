@@ -9,6 +9,7 @@ internal enum ShortcutAction
     Window,
     FullScreen,
     Delayed,
+    Scroll,
     Clipboard,
 }
 

@@ -33,7 +33,8 @@ internal sealed class TrayApplication : ApplicationContext
         actionItems[ShortcutAction.Region] = Item("框選截圖", () => coordinator.CaptureRegion());
         actionItems[ShortcutAction.Window] = Item("視窗截圖", () => coordinator.CaptureWindow());
         actionItems[ShortcutAction.FullScreen] = Item("全螢幕截圖", () => coordinator.CaptureFullScreen());
-        menu.Items.AddRange(new ToolStripItem[] { actionItems[ShortcutAction.Region], actionItems[ShortcutAction.Window], actionItems[ShortcutAction.FullScreen] });
+        actionItems[ShortcutAction.Scroll] = Item("捲動截圖", () => _ = coordinator.CaptureScrolling());
+        menu.Items.AddRange(new ToolStripItem[] { actionItems[ShortcutAction.Region], actionItems[ShortcutAction.Window], actionItems[ShortcutAction.FullScreen], actionItems[ShortcutAction.Scroll] });
 
         var delayed = new ToolStripMenuItem("延遲截圖");
         foreach (var seconds in new[] { 3, 5, 10 })
@@ -93,6 +94,7 @@ internal sealed class TrayApplication : ApplicationContext
             ShortcutAction.Window => coordinator.CaptureWindow(),
             ShortcutAction.FullScreen => coordinator.CaptureFullScreen(),
             ShortcutAction.Delayed => coordinator.CaptureDelayed(3),
+            ShortcutAction.Scroll => coordinator.CaptureScrolling(),
             ShortcutAction.Clipboard => ToggleClipboard(),
             _ => Task.CompletedTask,
         };

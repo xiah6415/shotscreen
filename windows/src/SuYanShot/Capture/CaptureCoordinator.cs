@@ -10,6 +10,8 @@ internal sealed class CaptureCoordinator
 {
     private readonly ImageExporter exporter;
     private bool busy;
+    private ScrollCaptureSession? scrolling;
+    private ScrollCaptureHud? scrollHud;
 
     public CaptureCoordinator(ImageExporter exporter)
     {
@@ -34,11 +36,13 @@ internal sealed class CaptureCoordinator
     /// All-in-One: adjust a region, then capture it, or switch to window / full-screen capture on the same frozen desktop.
     public Task CaptureAllInOne() => Run(async () =>
     {
+        if (scrolling != null) { await FinishScrolling(); return null; }
         var windows = WindowList.Snapshot();
         using var desktop = ScreenCapture.FreezeDesktop();
         return await AllInOneSession.Run(desktop) switch
         {
             AllInOneAction.Capture capture => desktop.Crop(capture.ScreenRect),
+            AllInOneAction.Scroll scroll => StartScrolling(scroll.ScreenRect),
             AllInOneAction.Window => await PickWindow(desktop, windows),
             AllInOneAction.FullScreen full => desktop.Crop(full.Monitor),
             _ => null,
@@ -63,6 +67,61 @@ internal sealed class CaptureCoordinator
         return ScreenCapture.CaptureRect(ScreenCapture.ScreenUnderCursor().Bounds);
     });
 
+    /// Select a region, then the user scrolls while frames are stitched. Running it again finishes the capture (as on macOS).
+    public async Task CaptureScrolling()
+    {
+        if (scrolling != null)
+        {
+            await FinishScrolling();
+            return;
+        }
+        if (busy) return;
+        busy = true;
+        Rectangle? region;
+        try
+        {
+            using var desktop = ScreenCapture.FreezeDesktop();
+            region = await SelectionSession.Run(desktop, SelectionMode.Region, Array.Empty<WindowInfo>()) is SelectionResult.Region selected ? selected.ScreenRect : null;
+        }
+        finally
+        {
+            busy = false;
+        }
+        if (region is Rectangle rect) StartScrolling(rect);
+    }
+
+    /// Always null: the image arrives when the user presses 完成.
+    private Bitmap? StartScrolling(Rectangle region)
+    {
+        if (region.Width < 40 || region.Height < 40) return null; // too small to match frames reliably
+        var session = new ScrollCaptureSession(region, progress => scrollHud?.Update(progress));
+        scrolling = session;
+        scrollHud = new ScrollCaptureHud(region,
+            onDone: () => _ = FinishScrolling(),
+            onCancel: CancelScrolling,
+            onAutoScroll: enabled => session.SetAutoScroll(enabled));
+        scrollHud.Show();
+        session.Start();
+        return null;
+    }
+
+    private async Task FinishScrolling()
+    {
+        if (scrolling is not ScrollCaptureSession session) return;
+        scrolling = null;
+        scrollHud?.Dispose();
+        scrollHud = null;
+        if (await session.Finish() is Bitmap image) Deliver(image);
+    }
+
+    private void CancelScrolling()
+    {
+        scrolling?.Cancel();
+        scrolling = null;
+        scrollHud?.Dispose();
+        scrollHud = null;
+    }
+
     private async Task Run(Func<Task<Bitmap?>> capture)
     {
         if (busy) return;
@@ -81,7 +140,11 @@ internal sealed class CaptureCoordinator
         {
             busy = false;
         }
-        if (image == null) return;
+        if (image != null) Deliver(image);
+    }
+
+    private void Deliver(Bitmap image)
+    {
         ClipboardManager.Copy(image);
         new FloatingThumbnail(image, exporter, ScreenCapture.ScreenUnderCursor(), OpenEditor).Show();
     }

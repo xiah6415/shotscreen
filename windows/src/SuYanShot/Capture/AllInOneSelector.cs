@@ -8,13 +8,15 @@ namespace SuYanShot.Capture;
 internal abstract record AllInOneAction
 {
     public sealed record Capture(Rectangle ScreenRect) : AllInOneAction;
+    public sealed record Scroll(Rectangle ScreenRect) : AllInOneAction;
     public sealed record Window : AllInOneAction;
     public sealed record FullScreen(Rectangle Monitor) : AllInOneAction;
 }
 
 /// CleanShot-style All-in-One overlay, as on macOS: drag out a region, adjust it (move / 8 handles, dragging past the
 /// opposite edge flips it), then pick an action from the toolbar. Enter or double-click inside captures, Esc / right-click
-/// cancels. Draws on the frozen desktop like the plain region selector. 捲動截圖 and 錄影 join the toolbar once they are ported.
+/// cancels, S starts a scroll capture of the region. Draws on the frozen desktop like the plain region selector.
+/// 錄影 joins the toolbar once recording is ported.
 internal sealed class AllInOneSession
 {
     private readonly List<AllInOneOverlay> overlays = new();
@@ -63,7 +65,7 @@ internal sealed class AllInOneOverlay : Form
 
     internal enum Grip { TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left }
 
-    private enum ToolbarButton { Capture, Window, FullScreen, Cancel }
+    private enum ToolbarButton { Capture, Scroll, Window, FullScreen, Cancel }
 
     private abstract record Drag
     {
@@ -75,6 +77,7 @@ internal sealed class AllInOneOverlay : Form
     private static readonly (ToolbarButton Button, string Title, string Hint)[] Buttons =
     {
         (ToolbarButton.Capture, "截圖", "截取選取範圍（Enter）"),
+        (ToolbarButton.Scroll, "捲動截圖", "開始捲動截圖（S）"),
         (ToolbarButton.Window, "視窗", "改選一個視窗"),
         (ToolbarButton.FullScreen, "全螢幕", "截取這個螢幕"),
         (ToolbarButton.Cancel, "取消", "取消（Esc）"),
@@ -160,6 +163,10 @@ internal sealed class AllInOneOverlay : Form
                 if (selection is Rectangle rect && rect.Width >= 2 && rect.Height >= 2)
                     session.Finish(new AllInOneAction.Capture(new Rectangle(rect.X + Monitor.X, rect.Y + Monitor.Y, rect.Width, rect.Height)));
                 break;
+            case ToolbarButton.Scroll:
+                if (selection is Rectangle scroll && scroll.Width >= 2 && scroll.Height >= 2)
+                    session.Finish(new AllInOneAction.Scroll(new Rectangle(scroll.X + Monitor.X, scroll.Y + Monitor.Y, scroll.Width, scroll.Height)));
+                break;
             case ToolbarButton.Window:
                 session.Finish(new AllInOneAction.Window());
                 break;
@@ -209,7 +216,7 @@ internal sealed class AllInOneOverlay : Form
         return null;
     }
 
-    private bool ButtonEnabled(ToolbarButton button) => button != ToolbarButton.Capture || selection != null;
+    private bool ButtonEnabled(ToolbarButton button) => button is not (ToolbarButton.Capture or ToolbarButton.Scroll) || selection != null;
 
     // MARK: Handles
 
@@ -343,6 +350,9 @@ internal sealed class AllInOneOverlay : Form
             case Keys.Enter:
                 Perform(ToolbarButton.Capture);
                 return true;
+            case Keys.S:
+                Perform(ToolbarButton.Scroll);
+                return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
@@ -470,6 +480,13 @@ internal sealed class AllInOneOverlay : Form
                 g.DrawLines(pen, new[] { new PointF(r.Right, r.Bottom - arm), new PointF(r.Right, r.Bottom), new PointF(r.Right - arm, r.Bottom) });
                 g.DrawLines(pen, new[] { new PointF(r.Left + arm, r.Bottom), new PointF(r.Left, r.Bottom), new PointF(r.Left, r.Bottom - arm) });
                 g.DrawEllipse(pen, RectangleF.Inflate(r, -r.Width * 0.3f, -r.Height * 0.3f));
+                break;
+            case ToolbarButton.Scroll:
+                // A page with a downward arrow.
+                g.DrawRectangle(pen, r.X + r.Width * 0.18f, r.Y, r.Width * 0.64f, r.Height * 0.72f);
+                g.DrawLine(pen, r.X + r.Width * 0.5f, r.Y + r.Height * 0.25f, r.X + r.Width * 0.5f, r.Bottom);
+                g.DrawLines(pen, new[] { new PointF(r.X + r.Width * 0.32f, r.Bottom - r.Height * 0.18f), new PointF(r.X + r.Width * 0.5f, r.Bottom),
+                                         new PointF(r.X + r.Width * 0.68f, r.Bottom - r.Height * 0.18f) });
                 break;
             case ToolbarButton.Window:
                 var window = RectangleF.Inflate(r, 0, -r.Height * 0.12f);

@@ -7,7 +7,7 @@ namespace SuYanShot.Shortcuts;
 /// An action saved as "" means the user cleared it; a missing action gets its default.
 internal sealed class ShortcutStore
 {
-    /// ⌘⇧1–5 on macOS become Ctrl+Shift+1–5 here.
+    /// ⌘⇧1–6 on macOS become Ctrl+Shift+1–6 here.
     public static readonly IReadOnlyDictionary<ShortcutAction, string> Defaults = new Dictionary<ShortcutAction, string>
     {
         [ShortcutAction.AllInOne] = "Ctrl+Shift+5",
@@ -15,6 +15,7 @@ internal sealed class ShortcutStore
         [ShortcutAction.Window] = "Ctrl+Shift+2",
         [ShortcutAction.FullScreen] = "Ctrl+Shift+3",
         [ShortcutAction.Delayed] = "Ctrl+Shift+4",
+        [ShortcutAction.Scroll] = "Ctrl+Shift+6",
         // macOS uses ⌘⇧V, but Ctrl+Shift+V is "paste as plain text" in browsers and Office, so it stays free here.
         [ShortcutAction.Clipboard] = "Ctrl+Alt+V",
     };

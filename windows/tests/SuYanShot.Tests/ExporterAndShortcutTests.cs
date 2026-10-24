@@ -77,7 +77,8 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         var shortcuts = new ShortcutStore(file).Load();
         Assert.Equal("Ctrl+Shift+1", shortcuts[ShortcutAction.Region].ToString());
-        Assert.Equal(6, shortcuts.Count);
+        Assert.Equal(7, shortcuts.Count);
+        Assert.Equal("Ctrl+Shift+6", shortcuts[ShortcutAction.Scroll].ToString());
         Assert.Equal("Ctrl+Shift+5", shortcuts[ShortcutAction.AllInOne].ToString());
         Assert.Equal("Ctrl+Alt+V", shortcuts[ShortcutAction.Clipboard].ToString());
     }
@@ -110,7 +111,7 @@ public sealed class ShortcutStoreTests : IDisposable
         store.Set(ShortcutAction.Delayed, null);
         Assert.False(new ShortcutStore(file).Load().ContainsKey(ShortcutAction.Delayed));
 
-        Assert.Equal(6, store.ResetToDefaults().Count);
+        Assert.Equal(7, store.ResetToDefaults().Count);
         Assert.False(File.Exists(file));
     }
 
@@ -119,7 +120,7 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, "{ not json");
-        Assert.Equal(6, new ShortcutStore(file).Load().Count);
+        Assert.Equal(7, new ShortcutStore(file).Load().Count);
     }
 
     public void Dispose()
