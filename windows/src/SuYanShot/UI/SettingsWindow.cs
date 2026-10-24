@@ -35,7 +35,7 @@ internal sealed class SettingsWindow : Form
         this.clipboard = clipboard;
         this.applyShortcuts = applyShortcuts;
 
-        Text = "素顏 Shot 設定";
+        Text = "拾光設定";
         Font = new Font("Microsoft JhengHei UI", 9.5f);
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.FixedDialog;

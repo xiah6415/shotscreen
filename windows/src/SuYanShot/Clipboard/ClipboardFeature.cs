@@ -21,7 +21,6 @@ internal sealed class ClipboardFeature : IDisposable
         PhoneShare = new PhoneShare(Store, item => monitor.Ignore(Paster.Write(item, Store)), settings);
         monitor.Captured += snapshot => Store.Add(snapshot);
         if (settings.ClipboardEnabled) monitor.Start();
-        if (PhoneShare.IsEnabled) PhoneShare.Start();
     }
 
     public bool IsEnabled
@@ -58,6 +57,13 @@ internal sealed class ClipboardFeature : IDisposable
         panel.ShowPanel();
     }
 
+    /// The tray switch. Turning it on without a password opens the settings so one can be set (as on macOS).
+    public void TogglePhoneShare()
+    {
+        PhoneShare.SetEnabled(!PhoneShare.IsEnabled);
+        if (PhoneShare.IsEnabled && !PhoneShare.Auth.HasPassword) ShowPhoneShare();
+    }
+
     public void ShowPhoneShare()
     {
         if (phoneShareWindow is { IsDisposed: false })
@@ -87,7 +93,7 @@ internal sealed class ClipboardFeature : IDisposable
 
     public void Dispose()
     {
-        PhoneShare.Stop();
+        PhoneShare.Dispose();
         monitor.Dispose();
     }
 }

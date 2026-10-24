@@ -160,7 +160,7 @@ internal sealed class ClipboardMonitor : NativeWindow, IDisposable
         if (owner == IntPtr.Zero) owner = GetForegroundWindow();
         if (owner == IntPtr.Zero) return default;
         NativeMethods.GetWindowThreadProcessId(owner, out var pid);
-        if (pid == Environment.ProcessId) return new Source("SuYanShot", "素顏 Shot");
+        if (pid == Environment.ProcessId) return new Source("Glean", "拾光");
         try
         {
             using var process = Process.GetProcessById((int)pid);

@@ -110,7 +110,7 @@ internal sealed class AllInOneOverlay : Form
         DoubleBuffered = true;
         KeyPreview = true;
         Cursor = Cursors.Cross;
-        Text = "素顏 Shot All-in-One";
+        Text = "拾光 All-in-One";
 
         var source = monitor;
         source.Offset(-desktop.Bounds.X, -desktop.Bounds.Y);

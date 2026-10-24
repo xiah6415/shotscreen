@@ -157,7 +157,7 @@ internal sealed class OverlayForm : Form
         KeyPreview = true;
         DoubleBuffered = true;
         Cursor = session.Mode == SelectionMode.Region ? Cursors.Cross : Cursors.Hand;
-        Text = "素顏 Shot";
+        Text = "拾光";
 
         // Pre-render once so redrawing on every mouse move stays cheap even on 4K monitors.
         var source = monitor;

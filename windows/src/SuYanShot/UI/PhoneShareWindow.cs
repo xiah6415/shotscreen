@@ -2,108 +2,222 @@ using SuYanShot.ClipboardHistory;
 
 namespace SuYanShot.UI;
 
-/// Turns phone sharing on and shows the QR code to scan, plus the fixed addresses for iOS Shortcuts.
-/// Closing the window keeps sharing on; 停止分享 (or the tray's 手機連線 switch) turns it off.
+/// 手機分享設定, as on macOS: the on/off switch, the fixed address (with QR code), password, signed-in devices,
+/// the local name, and which networks sharing may run on.
 internal sealed class PhoneShareWindow : Form
 {
-    private const int ContentWidth = 380;
+    private const int ContentWidth = 420;
 
     private readonly PhoneShare share;
-    private readonly PictureBox qr = new() { SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.White, Margin = new Padding(0, 0, 0, 12) };
-    private readonly Label message = new() { AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Anchor = AnchorStyles.None };
-    private readonly TextBox url = new() { ReadOnly = true, BorderStyle = BorderStyle.None, TextAlign = HorizontalAlignment.Center, Width = ContentWidth, Font = new Font("Consolas", 8.5f) };
-    private readonly Label status = new() { AutoSize = true, ForeColor = Color.SeaGreen, Anchor = AnchorStyles.None, Margin = new Padding(0, 6, 0, 6) };
-    private readonly Label shortcutsTitle = new() { Text = "iOS 捷徑用（「取得 URL 內容」動作）", AutoSize = true, Font = new Font("Microsoft JhengHei UI", 9.5f, FontStyle.Bold), Margin = new Padding(0, 10, 0, 4) };
-    private readonly TextBox shortcuts = new() { ReadOnly = true, Multiline = true, WordWrap = false, ScrollBars = ScrollBars.Horizontal, Width = ContentWidth, Height = 96, Font = new Font("Consolas", 8.5f) };
-    private readonly Button copyShortcuts = new() { Text = "複製捷徑網址", AutoSize = true, Anchor = AnchorStyles.Left };
-    private readonly Button regenerate = new() { Text = "換一組網址", AutoSize = true };
-    private readonly Button stop = new() { Text = "停止分享", AutoSize = true };
-    private readonly Button start = new() { Text = "開始分享", AutoSize = true };
-    private readonly System.Windows.Forms.Timer refresh = new() { Interval = 15_000 };
-    private readonly ToolTip tips = new();
+    private readonly CheckBox enabled = new() { Text = "手機分享", AutoSize = true, Font = new Font("Microsoft JhengHei UI", 10.5f, FontStyle.Bold) };
+    private readonly Label status = new() { AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Margin = new Padding(0, 4, 0, 8) };
+
+    private readonly TableLayoutPanel address = new() { AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 8) };
+    private readonly PictureBox qr = new() { SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.White, Size = new Size(140, 140), Margin = new Padding(0, 0, 14, 0) };
+    private readonly TextBox url = new() { ReadOnly = true, BorderStyle = BorderStyle.None, Width = 250, Font = new Font("Consolas", 11f, FontStyle.Bold) };
+    private readonly Label ipFallback = new() { AutoSize = true, MaximumSize = new Size(260, 0), ForeColor = SystemColors.GrayText };
     private string? renderedUrl;
+
+    private readonly Label passwordTitle = Heading("");
+    private readonly TextBox password = new() { UseSystemPasswordChar = true, Width = 200, PlaceholderText = $"新密碼（至少 {PhoneShareAuth.MinimumPasswordLength} 個字）" };
+    private readonly TextBox confirmation = new() { UseSystemPasswordChar = true, Width = 200, PlaceholderText = "再輸入一次" };
+    private readonly Button savePassword = new() { AutoSize = true };
+    private readonly Label passwordMessage = new() { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left };
+    private readonly Label passwordNote = Note("更改密碼後，所有裝置都要重新登入。");
+
+    private readonly FlowLayoutPanel devices = Column();
+    private readonly TextBox nameBox = new() { Width = 120, Font = new Font("Consolas", 10f) };
+    private readonly Button applyName = new() { Text = "套用", AutoSize = true };
+    private readonly CheckBox homeOnly = new() { Text = "只在允許的網路開放", AutoSize = true, Margin = new Padding(0, 4, 0, 4) };
+    private readonly FlowLayoutPanel networks = Column();
+    private readonly System.Windows.Forms.Timer refresh = new() { Interval = 15_000 };
+    private bool rendering;
 
     public PhoneShareWindow(PhoneShare share)
     {
         this.share = share;
-        Text = "在手機上開啟剪貼簿";
+        Text = "手機分享設定";
+        Icon = AppIcon.Window;
         Font = new Font("Microsoft JhengHei UI", 9.5f);
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        Padding = new Padding(24);
+        AutoScroll = true;
+        ClientSize = new Size(ContentWidth + 48, 640);
 
-        var layout = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, Dock = DockStyle.Fill };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ContentWidth));
-        qr.Size = new Size(244, 244);
-        qr.Anchor = AnchorStyles.None;
-        url.Anchor = AnchorStyles.None;
-        url.BackColor = BackColor;
-        var note = new Label
-        {
-            Text = "網址會一直保持一樣，可以加到主畫面或設成捷徑。只有同一個網路裡、拿到這個網址的裝置看得到。" +
-                   "電腦的 IP 變了網址也會跟著變，建議在路由器把這台電腦設成固定 IP（DHCP 保留）。",
-            AutoSize = true, MaximumSize = new Size(ContentWidth, 0), ForeColor = SystemColors.GrayText, Margin = new Padding(0, 6, 0, 6),
-        };
-        var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, WrapContents = false, Margin = new Padding(0, 12, 0, 0) };
-        buttons.Controls.AddRange(new Control[] { regenerate, stop, start });
-        foreach (var control in new Control[] { qr, message, url, status, note, shortcutsTitle, shortcuts, copyShortcuts, buttons })
-            layout.Controls.Add(control);
+        var layout = Column();
+        layout.Padding = new Padding(22);
+
+        layout.Controls.Add(enabled);
+        layout.Controls.Add(Note("打開後，拾光啟動時會自動開始分享。"));
+        layout.Controls.Add(status);
+
+        var addressText = Column();
+        addressText.Controls.Add(Heading("在手機上打開"));
+        addressText.Controls.Add(url);
+        addressText.Controls.Add(Note("每台電腦上的拾光都用這個網址，所以換電腦或給別人用，同一個捷徑都能用。用 Safari 打開後，按「分享 → 加入主畫面」就會變成一個 App。", 260));
+        addressText.Controls.Add(ipFallback);
+        address.Controls.Add(qr, 0, 0);
+        address.Controls.Add(addressText, 1, 0);
+        layout.Controls.Add(address);
+
+        layout.Controls.Add(Divider());
+        layout.Controls.Add(passwordTitle);
+        var passwordRow = Row();
+        passwordRow.Controls.AddRange(new Control[] { password, confirmation });
+        layout.Controls.Add(passwordRow);
+        var saveRow = Row();
+        saveRow.Controls.AddRange(new Control[] { savePassword, passwordMessage });
+        layout.Controls.Add(saveRow);
+        layout.Controls.Add(passwordNote);
+
+        layout.Controls.Add(Divider());
+        layout.Controls.Add(devices);
+
+        layout.Controls.Add(Divider());
+        layout.Controls.Add(Heading("網址名稱"));
+        var nameRow = Row();
+        nameRow.Controls.Add(new Label { Text = "http://", AutoSize = true, Font = nameBox.Font, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) });
+        nameRow.Controls.Add(nameBox);
+        nameRow.Controls.Add(new Label { Text = $".local:{PhoneShare.DefaultPort}", AutoSize = true, Font = nameBox.Font, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 8, 0) });
+        nameRow.Controls.Add(applyName);
+        layout.Controls.Add(nameRow);
+        layout.Controls.Add(Note("維持預設的 glean，換電腦時捷徑才不用改。同一個網路裡有兩台電腦都開著時，第二台會自動改用 glean-2。"));
+
+        layout.Controls.Add(Divider());
+        layout.Controls.Add(homeOnly);
+        layout.Controls.Add(networks);
+
+        layout.Controls.Add(Divider());
+        layout.Controls.Add(Note("連線沒有加密，所以只建議在自己家裡、信任的網路使用。手機能看到剪貼簿紀錄，也能傳文字或照片到這台電腦。" +
+                                 "第一次開始分享時，Windows 防火牆會詢問是否允許拾光連線，請允許「私人網路」。"));
         Controls.Add(layout);
 
-        tips.SetToolTip(regenerate, "舊的網址和捷徑會立刻失效");
-        regenerate.Click += (_, _) => share.RegenerateLink();
-        stop.Click += (_, _) => share.IsEnabled = false;
-        start.Click += (_, _) => share.IsEnabled = true;
-        copyShortcuts.Click += (_, _) =>
+        enabled.CheckedChanged += (_, _) => { if (!rendering) share.SetEnabled(enabled.Checked); };
+        homeOnly.CheckedChanged += (_, _) => { if (!rendering) share.SetRestrictToHomeNetworks(homeOnly.Checked); };
+        savePassword.Click += (_, _) => SavePassword();
+        nameBox.TextChanged += (_, _) => applyName.Enabled = LocalNameAdvertiser.Sanitize(nameBox.Text) != share.LocalName;
+        applyName.Click += (_, _) =>
         {
-            System.Windows.Forms.Clipboard.SetText(shortcuts.Text);
-            copyShortcuts.Text = "已複製";
+            share.SetLocalName(nameBox.Text);
+            nameBox.Text = share.LocalName;
         };
+        nameBox.Text = share.LocalName;
         share.Changed += Render;
-        refresh.Tick += (_, _) => Render(); // keeps "上次連線 N 分鐘前" current
+        refresh.Tick += (_, _) => Render(); // keeps "上次使用 N 分鐘前" current
         refresh.Start();
-
-        share.IsEnabled = true;
         Render();
+    }
+
+    private void SavePassword()
+    {
+        if (password.Text.Length < PhoneShareAuth.MinimumPasswordLength) { passwordMessage.Text = "密碼太短了"; return; }
+        if (password.Text != confirmation.Text) { passwordMessage.Text = "兩次輸入的不一樣"; return; }
+        share.SetPassword(password.Text);
+        password.Clear();
+        confirmation.Clear();
+        passwordMessage.Text = "已儲存";
     }
 
     private void Render()
     {
         if (IsDisposed) return;
-        var running = share.IsRunning;
-        if (share.Url is string link && share.BaseUrl is string baseUrl)
+        rendering = true;
+        SuspendLayout();
+        enabled.Checked = share.IsEnabled;
+        (status.Text, status.ForeColor) = share.Status switch
+        {
+            PhoneShareStatus.Off => ("已關閉", SystemColors.GrayText),
+            PhoneShareStatus.NeedsPassword => ("先在下面設定密碼，才會開始分享。", Color.DarkOrange),
+            PhoneShareStatus.NoNetwork => ("沒有連上網路，等連上後會自動開始。", Color.DarkOrange),
+            PhoneShareStatus.OtherNetwork => ("目前的網路不在允許清單，已暫停分享。回到允許的網路會自動恢復。", Color.DarkOrange),
+            PhoneShareStatus.Starting => ("啟動中…", SystemColors.GrayText),
+            PhoneShareStatus.Running => (share.LastActivity is DateTimeOffset last ? $"分享中 · 手機上次使用 {ClipboardPanel.Age(last)}" : "分享中，等待手機連線", Color.SeaGreen),
+            _ => ($"無法開始分享：{share.FailureMessage}", Color.Firebrick),
+        };
+
+        // Prefer the .local name; until it is published (or if it can't be), show the IP address instead.
+        var link = share.IsServing ? share.Url ?? share.IpUrl : null;
+        address.Visible = link != null;
+        if (link != null)
         {
             if (link != renderedUrl)
             {
                 qr.Image?.Dispose();
-                qr.Image = QrCode.Encode(link).ToBitmap(8);
+                qr.Image = QrCode.Encode(link).ToBitmap(6);
                 renderedUrl = link;
-                copyShortcuts.Text = "複製捷徑網址";
             }
-            message.Text = "手機和這台電腦連同一個 Wi-Fi，用相機掃描 QR code。";
             url.Text = link;
-            status.Text = share.LastActivity is DateTimeOffset last ? $"分享中 · 手機上次連線 {ClipboardPanel.Age(last)}" : "分享中，等待手機連線";
-            var t = Uri.EscapeDataString(share.Token);
-            shortcuts.Text = string.Join("\r\n",
-                $"傳文字到電腦（POST，內容放文字）：{baseUrl}/api/send?t={t}",
-                $"傳照片到電腦（POST，內容放圖片檔）：{baseUrl}/api/send?t={t}",
-                $"取得電腦上最新一筆文字（GET）：{baseUrl}/api/latest?t={t}",
-                $"打開剪貼簿網頁：{link}");
+            ipFallback.Text = share.Url != null && share.IpUrl != null ? $"打不開的話改用：{share.IpUrl}"
+                : share.NameProblem != null ? $"無法發布 {share.LocalName}.local（{share.NameProblem}），先用 IP 位址。" : "";
         }
-        else
+
+        passwordTitle.Text = share.Auth.HasPassword ? "更改密碼" : "設定密碼";
+        savePassword.Text = passwordTitle.Text;
+        passwordNote.Visible = share.Auth.HasPassword;
+
+        devices.Controls.Clear();
+        devices.Visible = share.Auth.Devices.Count > 0;
+        if (devices.Visible)
         {
-            renderedUrl = null;
-            message.Text = share.Problem ?? (running ? "準備中…" : "已停止分享。");
+            var header = Row();
+            header.Controls.Add(Heading("已登入的裝置"));
+            var signOutAll = new Button { Text = "全部登出", AutoSize = true, Margin = new Padding(16, 0, 0, 0) };
+            signOutAll.Click += (_, _) => share.Auth.RevokeAll();
+            header.Controls.Add(signOutAll);
+            devices.Controls.Add(header);
+            foreach (var device in share.Auth.Devices)
+            {
+                var row = Row();
+                row.Controls.Add(new Label { Text = $"📱 {device.Name}　最近使用 {ClipboardPanel.Age(device.LastSeen)}", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 8, 0) });
+                var remove = new Button { Text = "移除", AutoSize = true };
+                var id = device.Id;
+                remove.Click += (_, _) => share.Auth.Revoke(id);
+                row.Controls.Add(remove);
+                devices.Controls.Add(row);
+            }
         }
-        foreach (var control in new Control[] { qr, url, status, shortcutsTitle, shortcuts, copyShortcuts })
-            control.Visible = share.Url != null;
-        regenerate.Visible = stop.Visible = running;
-        start.Visible = !running;
+
+        applyName.Enabled = LocalNameAdvertiser.Sanitize(nameBox.Text) != share.LocalName;
+        homeOnly.Checked = share.RestrictToHomeNetworks;
+        networks.Controls.Clear();
+        networks.Visible = share.RestrictToHomeNetworks;
+        if (networks.Visible)
+        {
+            foreach (var network in share.HomeNetworks)
+            {
+                var row = Row();
+                var current = network.Id == share.CurrentNetwork?.Id;
+                row.Controls.Add(new Label { Text = network.Label + (current ? "（目前）" : ""), AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 8, 0) });
+                var remove = new Button { Text = "移除", AutoSize = true };
+                var id = network.Id;
+                remove.Click += (_, _) => share.RemoveNetwork(id);
+                row.Controls.Add(remove);
+                networks.Controls.Add(row);
+            }
+            if (share.CurrentNetwork is NetworkIdentity now && !share.HomeNetworks.Any(n => n.Id == now.Id))
+            {
+                var allow = new Button { Text = $"允許目前的網路（{now.Label}）", AutoSize = true };
+                allow.Click += (_, _) => share.AllowCurrentNetwork();
+                networks.Controls.Add(allow);
+            }
+            networks.Controls.Add(Note("以路由器辨認網路。在咖啡廳、公司等其他網路會自動暫停分享。"));
+        }
+        ResumeLayout();
+        rendering = false;
     }
+
+    private static FlowLayoutPanel Column() => new() { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+
+    private static FlowLayoutPanel Row() => new() { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2) };
+
+    private static Label Heading(string text) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft JhengHei UI", 9.5f, FontStyle.Bold), Margin = new Padding(0, 4, 0, 4) };
+
+    private static Label Note(string text, int width = ContentWidth) =>
+        new() { Text = text, AutoSize = true, MaximumSize = new Size(width, 0), ForeColor = SystemColors.GrayText, Margin = new Padding(0, 2, 0, 4) };
+
+    private static Label Divider() => new() { AutoSize = false, Height = 1, Width = ContentWidth, BorderStyle = BorderStyle.Fixed3D, Margin = new Padding(0, 10, 0, 10) };
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

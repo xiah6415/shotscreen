@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Drawing.Drawing2D;
 using SuYanShot.Capture;
 using SuYanShot.ClipboardHistory;
 using SuYanShot.Shortcuts;
@@ -18,7 +17,9 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon trayIcon;
     private readonly Dictionary<ShortcutAction, ToolStripMenuItem> actionItems = new();
     private readonly ClipboardFeature clipboard;
+    private readonly ToolStripMenuItem phoneSwitch;
     private SettingsWindow? settingsWindow;
+    private bool trayShowsSharing;
 
     public TrayApplication()
     {
@@ -45,23 +46,22 @@ internal sealed class TrayApplication : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         actionItems[ShortcutAction.Clipboard] = Item("剪貼簿紀錄", () => clipboard!.TogglePanel());
         menu.Items.Add(actionItems[ShortcutAction.Clipboard]);
-        var phoneSwitch = new ToolStripMenuItem("手機連線", null, (_, _) => clipboard!.PhoneShare.IsEnabled = !clipboard.PhoneShare.IsEnabled);
+        phoneSwitch = Item("手機分享", () => clipboard!.TogglePhoneShare());
         menu.Items.Add(phoneSwitch);
-        menu.Items.Add(Item("在手機上開啟…", () => clipboard!.ShowPhoneShare()));
+        menu.Items.Add(Item("手機分享設定…", () => clipboard!.ShowPhoneShare()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Opening += (_, _) => phoneSwitch.Checked = clipboard!.PhoneShare.IsRunning;
         menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
         menu.Items.Add(Item("設定…", OpenSettings));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Item("結束 素顏 Shot", ExitThread));
+        menu.Items.Add(Item("結束拾光", ExitThread));
 
         // Created after the menu, so a WinForms synchronization context exists for the clipboard and phone server.
         clipboard = new ClipboardFeature(AppSettings.Load());
 
         trayIcon = new NotifyIcon
         {
-            Icon = CreateIcon(),
-            Text = "素顏 Shot",
+            Icon = AppIcon.Tray(sharing: false),
+            Text = "拾光",
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -73,9 +73,13 @@ internal sealed class TrayApplication : ApplicationContext
                 ?.Invoke(trayIcon, null);
         };
 
+        clipboard.PhoneShare.Changed += UpdatePhoneShare;
+        UpdatePhoneShare();
+        StartupRegistration.RefreshPath();
+
         var failed = ApplyShortcuts(shortcutStore.Load());
         if (failed.Count > 0)
-            trayIcon.ShowBalloonTip(5000, "素顏 Shot", "有快捷鍵已被其他程式使用，可以在「設定…」換一組。", ToolTipIcon.Warning);
+            trayIcon.ShowBalloonTip(5000, "拾光", "有快捷鍵已被其他程式使用，可以在「設定…」換一組。", ToolTipIcon.Warning);
     }
 
     private static ToolStripMenuItem Item(string title, Action action) => new(title, null, (_, _) => action());
@@ -122,27 +126,26 @@ internal sealed class TrayApplication : ApplicationContext
         settingsWindow.Activate();
     }
 
-    /// A viewfinder glyph drawn at runtime, so the project needs no binary icon file yet.
-    private static Icon CreateIcon()
+    /// Check mark and status on 手機分享, and a dot on the tray icon while phones can connect (as on macOS).
+    private void UpdatePhoneShare()
     {
-        var size = SystemInformation.SmallIconSize.Width;
-        using var bitmap = new Bitmap(size, size);
-        using (var g = Graphics.FromImage(bitmap))
+        var share = clipboard.PhoneShare;
+        string? note = share.Status switch
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            var stroke = Math.Max(1.5f, size / 10f);
-            using var pen = new Pen(Color.White, stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            var inset = stroke;
-            var far = size - inset;
-            var arm = size * 0.3f;
-            g.DrawLines(pen, new[] { new PointF(inset, inset + arm), new PointF(inset, inset), new PointF(inset + arm, inset) });
-            g.DrawLines(pen, new[] { new PointF(far - arm, inset), new PointF(far, inset), new PointF(far, inset + arm) });
-            g.DrawLines(pen, new[] { new PointF(far, far - arm), new PointF(far, far), new PointF(far - arm, far) });
-            g.DrawLines(pen, new[] { new PointF(inset + arm, far), new PointF(inset, far), new PointF(inset, far - arm) });
-            var dot = size * 0.22f;
-            g.FillEllipse(Brushes.White, (size - dot) / 2, (size - dot) / 2, dot, dot);
-        }
-        return Icon.FromHandle(bitmap.GetHicon());
+            PhoneShareStatus.Running => "分享中",
+            PhoneShareStatus.OtherNetwork => "暫停：不在允許的網路",
+            PhoneShareStatus.NeedsPassword => "要先設定密碼",
+            PhoneShareStatus.NoNetwork => "等待網路",
+            PhoneShareStatus.Failed => "無法啟動",
+            _ => null,
+        };
+        phoneSwitch.Checked = share.IsEnabled;
+        phoneSwitch.Text = share.IsEnabled && note != null ? $"手機分享（{note}）" : "手機分享";
+        if (trayShowsSharing == share.IsServing) return;
+        trayShowsSharing = share.IsServing;
+        var old = trayIcon.Icon;
+        trayIcon.Icon = AppIcon.Tray(trayShowsSharing);
+        old?.Dispose();
     }
 
     protected override void ExitThreadCore()

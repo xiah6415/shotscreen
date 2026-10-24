@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Ported from Sources/SuYanShot/Clipboard/PhoneSharePage.swift (loginHTML); only the wording "Mac" became "電腦". Keep the two in step. -->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="拾光">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>登入拾光</title>
+<style>
+  :root { --bg: #f2f2f7; --card: #fff; --text: #1c1c1e; --muted: #8e8e93; --accent: #ff7a59; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text);
+         font: 16px -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", sans-serif; padding: 24px; }
+  form { width: 100%; max-width: 340px; background: var(--card); border-radius: 18px; padding: 28px 22px; display: grid; gap: 14px; text-align: center; }
+  img { width: 72px; height: 72px; margin: 0 auto; border-radius: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  input { font-size: 17px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(128,128,128,.3); background: transparent; color: var(--text); width: 100%; }
+  button { font-size: 17px; font-weight: 600; padding: 12px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; }
+  #error { color: #ff453a; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<form id="form" autocomplete="on">
+  <img src="/apple-touch-icon.png" alt="">
+  <h1>拾光剪貼簿</h1>
+  <p>輸入你在電腦上「手機分享設定」設的密碼。這台裝置之後就不用再輸入。</p>
+  <input id="password" type="password" autocomplete="current-password" placeholder="密碼" required>
+  <input id="device" type="text" autocomplete="off" placeholder="這台裝置的名字（例如：我的 iPhone）">
+  <button type="submit">登入</button>
+  <p id="error"></p>
+</form>
+<script>
+const guess = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android 手機' : '瀏覽器';
+document.getElementById('device').value = guess;
+document.getElementById('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const error = document.getElementById('error');
+  error.textContent = '';
+  try {
+    const r = await fetch('/api/login', { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'glean' },
+      body: JSON.stringify({ password: document.getElementById('password').value, device: document.getElementById('device').value }) });
+    const data = await r.json();
+    if (data.ok) { location.replace('/'); return; }
+    if (data.error === 'locked') error.textContent = '錯太多次了，請 ' + data.seconds + ' 秒後再試。';
+    else error.textContent = '密碼不對' + (data.remaining > 0 ? '，還可以再試 ' + data.remaining + ' 次。' : '。');
+  } catch (err) { error.textContent = '連不到電腦，請確認電腦開著、拾光的手機分享有打開，而且在同一個網路。'; }
+};
+</script>
+</body>
+</html>

@@ -74,7 +74,7 @@ internal sealed class CaptureCoordinator
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"截圖失敗：{ex.Message}", "素顏 Shot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show($"截圖失敗：{ex.Message}", "拾光", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         finally

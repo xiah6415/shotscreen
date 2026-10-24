@@ -4,123 +4,190 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SuYanShot.App;
+using SuYanShot.UI;
 using static SuYanShot.ClipboardHistory.PhoneShareServer;
 
 namespace SuYanShot.ClipboardHistory;
 
-/// Serves the clipboard history to a phone browser on the same network, and accepts text/images sent back.
-/// Same routes and page as macOS, plus GET /api/latest for iOS Shortcuts.
-/// Unlike macOS this is an on/off switch that survives restarts, with a port and token that stay the same until
-/// 換一組網址, so a phone bookmark or Shortcut keeps working (macOS stops after 30 idle minutes with a new link each time).
-internal sealed class PhoneShare
+internal enum PhoneShareStatus { Off, NeedsPassword, NoNetwork, OtherNetwork, Starting, Running, Failed }
+
+/// Serves the clipboard history to phones on the same network at a fixed address (`http://glean.local:8765`, published
+/// over multicast DNS), and accepts text/images sent back. Same design, routes and pages as macOS: a switch in the tray
+/// menu turns it on and it then starts with the app; devices sign in once with a password; it only runs on networks
+/// the user allowed.
+internal sealed class PhoneShare : IDisposable
 {
+    public const int DefaultPort = 8765;
     private const int MaxTextLength = 100_000;
+    private const int CookieMaxAge = 365 * 24 * 60 * 60;
+
+    /// Seams for tests; the app uses the defaults.
+    internal sealed record Options
+    {
+        public int Port { get; init; } = DefaultPort;
+        public Func<LocalNetwork?> FindNetwork { get; init; } = LocalNetwork.Find;
+        public Func<string, NetworkIdentity> IdentifyRouter { get; init; } = NetworkIdentity.ForRouter;
+        public bool Advertise { get; init; } = true;
+        public string? AuthPath { get; init; }
+    }
 
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly Lazy<byte[]> Page = new(() => LoadResource("SuYanShot.PhoneSharePage.html"));
+    private static readonly Lazy<byte[]> LoginPage = new(() => LoadResource("SuYanShot.PhoneShareLogin.html"));
+    private static readonly Lazy<byte[]> TouchIcon = new(() => AppIcon.Png(180));
 
     private readonly ClipboardStore store;
     /// Puts an entry on this PC's clipboard (without recording it again).
     private readonly Action<ClipboardItem> putOnClipboard;
-    private readonly PhoneShareServer server;
     private readonly AppSettings settings;
-    private static readonly Lazy<byte[]> Page = new(LoadPage);
+    private readonly Options options;
+    private readonly PhoneShareServer server;
+    private readonly LocalNameAdvertiser? advertiser;
+    private readonly NetworkChangeMonitor networkMonitor = new();
 
-    public bool IsRunning => server.Status == State.Running;
-    public string? Url { get; private set; }
-    public string? Problem { get; private set; }
+    public PhoneShareAuth Auth { get; }
+    public PhoneShareStatus Status { get; private set; } = PhoneShareStatus.Off;
+    public string? FailureMessage { get; private set; }
+    public NetworkIdentity? CurrentNetwork { get; private set; }
+    public string? Address { get; private set; }
+    public string? PublishedName => advertiser?.PublishedName;
+    public string? NameProblem => advertiser?.Problem;
     public DateTimeOffset? LastActivity { get; private set; }
 
-    /// Raised on the UI thread whenever the state, link or last activity changes.
+    public bool IsEnabled => settings.PhoneShareEnabled;
+    public string LocalName => LocalNameAdvertiser.Sanitize(settings.PhoneShareName);
+    public bool RestrictToHomeNetworks => settings.PhoneShareHomeOnly;
+    public IReadOnlyList<NetworkIdentity> HomeNetworks => settings.PhoneShareHomeNetworks;
+    public bool IsServing => Status == PhoneShareStatus.Running;
+    public int Port => server.Status == State.Running ? server.Port : options.Port;
+
+    /// The address to bookmark: the same on every computer running 拾光 with the default name.
+    public string? Url => PublishedName is string name ? $"http://{name}:{Port}/" : null;
+
+    /// Fallback if the phone can't resolve .local names.
+    public string? IpUrl => Address is string address ? $"http://{address}:{Port}/" : null;
+
+    /// Raised on the UI thread whenever anything shown in the menu or settings window changes.
     public event Action? Changed;
 
-    public PhoneShare(ClipboardStore store, Action<ClipboardItem> putOnClipboard, AppSettings settings)
+    public PhoneShare(ClipboardStore store, Action<ClipboardItem> putOnClipboard, AppSettings settings, Options? options = null)
     {
         this.store = store;
         this.putOnClipboard = putOnClipboard;
         this.settings = settings;
+        this.options = options ?? new Options();
+        Auth = new PhoneShareAuth(this.options.AuthPath);
+        Auth.Changed += () => Changed?.Invoke();
         server = new PhoneShareServer(Handle);
         server.StateChanged += ServerStateChanged;
-        server.Activity += () =>
+        if (this.options.Advertise)
         {
-            LastActivity = DateTimeOffset.Now;
-            Changed?.Invoke();
-        };
+            advertiser = new LocalNameAdvertiser();
+            advertiser.Changed += _ => Changed?.Invoke();
+        }
+        networkMonitor.Changed += Refresh;
+        Refresh();
     }
 
-    /// The 手機連線 switch. Remembered, so sharing comes back on when the app starts.
-    public bool IsEnabled
-    {
-        get => settings.PhoneShareEnabled;
-        set
-        {
-            settings.PhoneShareEnabled = value;
-            settings.Save();
-            if (value) Start(); else Stop();
-            Changed?.Invoke();
-        }
-    }
+    // MARK: Settings
 
-    /// Starts with the saved port and token, creating and saving them the first time.
-    public void Start()
+    public void SetEnabled(bool enabled)
     {
-        if (IsRunning) return;
-        Problem = null;
-        LastActivity = null;
-        if (string.IsNullOrEmpty(settings.PhoneShareToken))
-        {
-            settings.PhoneShareToken = MakeToken();
-            settings.Save();
-        }
-        server.Start(settings.PhoneSharePort, settings.PhoneShareToken);
-        if (IsRunning && server.Port != settings.PhoneSharePort)
-        {
-            settings.PhoneSharePort = server.Port;
-            settings.Save();
-        }
-    }
-
-    public void Stop() => server.Stop();
-
-    /// Invalidates the saved link (and any Shortcut using it).
-    public void RegenerateLink()
-    {
-        settings.PhoneShareToken = MakeToken();
+        settings.PhoneShareEnabled = enabled;
+        // First time on: trust the network the PC is on now.
+        if (enabled && RestrictToHomeNetworks && HomeNetworks.Count == 0 && CurrentIdentity() is NetworkIdentity network) Allow(network);
         settings.Save();
-        server.SetToken(settings.PhoneShareToken);
+        Refresh();
     }
 
-    internal int Port => server.Port;
-    internal string Token => server.Token;
+    public void SetLocalName(string name)
+    {
+        settings.PhoneShareName = LocalNameAdvertiser.Sanitize(name);
+        settings.Save();
+        Refresh();
+    }
 
-    /// http://address:port, the part of the link before the path, for Shortcuts.
-    public string? BaseUrl { get; private set; }
+    public void SetRestrictToHomeNetworks(bool restrict)
+    {
+        settings.PhoneShareHomeOnly = restrict;
+        settings.Save();
+        Refresh();
+    }
+
+    public void AllowCurrentNetwork()
+    {
+        if (CurrentIdentity() is NetworkIdentity network) Allow(network);
+        settings.Save();
+        Refresh();
+    }
+
+    public void RemoveNetwork(string id)
+    {
+        settings.PhoneShareHomeNetworks.RemoveAll(n => n.Id == id);
+        settings.Save();
+        Refresh();
+    }
+
+    public void SetPassword(string password)
+    {
+        Auth.SetPassword(password);
+        Refresh();
+    }
+
+    private void Allow(NetworkIdentity network)
+    {
+        if (!settings.PhoneShareHomeNetworks.Any(n => n.Id == network.Id)) settings.PhoneShareHomeNetworks.Add(network);
+    }
+
+    private NetworkIdentity? CurrentIdentity() =>
+        options.FindNetwork() is { Gateway: string router } ? options.IdentifyRouter(router) : null;
+
+    // MARK: Running
+
+    /// Starts or stops serving to match the switch, the password and the current network.
+    public void Refresh()
+    {
+        var network = options.FindNetwork();
+        CurrentNetwork = network is { Gateway: string router } ? options.IdentifyRouter(router) : null;
+        if (!IsEnabled) { StopServing(PhoneShareStatus.Off); return; }
+        if (!Auth.HasPassword) { StopServing(PhoneShareStatus.NeedsPassword); return; }
+        if (network == null || CurrentNetwork == null) { StopServing(PhoneShareStatus.NoNetwork); return; }
+        if (RestrictToHomeNetworks && !HomeNetworks.Any(n => n.Id == CurrentNetwork.Id)) { StopServing(PhoneShareStatus.OtherNetwork); return; }
+        Address = network.Address;
+        if (server.Status != State.Running)
+        {
+            Status = PhoneShareStatus.Starting;
+            server.Start(options.Port);
+        }
+        advertiser?.Publish(LocalName, network.Address);
+        Changed?.Invoke();
+    }
+
+    public void Stop() => StopServing(PhoneShareStatus.Off);
+
+    private void StopServing(PhoneShareStatus reason)
+    {
+        server.Stop();
+        advertiser?.Stop();
+        Address = null;
+        Status = reason;
+        Changed?.Invoke();
+    }
 
     private void ServerStateChanged()
     {
         switch (server.Status)
         {
             case State.Running:
-                if (LocalIPv4Address() is string address)
-                {
-                    BaseUrl = $"http://{address}:{server.Port}";
-                    Url = $"{BaseUrl}/?t={server.Token}";
-                    Problem = null;
-                }
-                else
-                {
-                    Url = null;
-                    Problem = "找不到區域網路位址，請確認這台電腦已連上 Wi-Fi 或有線網路。";
-                }
+                Status = PhoneShareStatus.Running;
+                FailureMessage = null;
                 break;
             case State.Failed:
-                Url = null;
-                Problem = $"無法開始分享：{server.Failure}";
-                break;
-            default:
-                Url = null;
+                Status = PhoneShareStatus.Failed;
+                FailureMessage = server.FailedBecausePortInUse ? $"{options.Port} 埠被其他程式佔用了。" : server.Failure;
+                advertiser?.Stop();
                 break;
         }
-        if (Url == null) BaseUrl = null;
         Changed?.Invoke();
     }
 
@@ -130,10 +197,34 @@ internal sealed class PhoneShare
     {
         var parts = request.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var method = request.Method;
-        if (method == "GET" && parts.Length == 0) return new Response(200, "text/html; charset=utf-8", Page.Value);
+
+        // Public: what the login page and Home Screen need.
+        if (method == "GET" && parts is ["apple-touch-icon.png"]) return new Response(200, "image/png", TouchIcon.Value);
+        if (method == "GET" && parts is ["manifest.webmanifest"])
+        {
+            return Response.Text("""{"name":"拾光剪貼簿","short_name":"拾光","start_url":"/","display":"standalone","background_color":"#000000","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}""",
+                                 type: "application/manifest+json");
+        }
+        // Cross-site forms can't set custom headers without a CORS preflight, which this server never answers.
+        if (method == "POST" && request.Headers.GetValueOrDefault("x-requested-with") != "glean") return Response.Text("Forbidden", 403);
+        if (method == "POST" && parts is ["api", "login"]) return Login(request);
+
+        var device = request.Cookies.TryGetValue(PhoneShareAuth.CookieName, out var token) ? Auth.DeviceForToken(token) : null;
+        if (method == "GET" && parts.Length == 0) return new Response(200, "text/html; charset=utf-8", device == null ? LoginPage.Value : Page.Value);
+        if (device == null) return Response.Text("""{"ok":false,"error":"login"}""", 401, "application/json");
+        LastActivity = DateTimeOffset.Now;
+        Changed?.Invoke();
+
+        if (method == "POST" && parts is ["api", "logout"])
+        {
+            Auth.Revoke(device.Id);
+            return Response.Text("""{"ok":true}""", type: "application/json") with
+            {
+                Headers = new Dictionary<string, string> { ["Set-Cookie"] = $"{PhoneShareAuth.CookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" },
+            };
+        }
         if (method == "GET" && parts is ["api", "items"]) return ItemsResponse(request.Query.GetValueOrDefault("v"));
         if (method == "POST" && parts is ["api", "send"]) return await Receive(request);
-        if (method == "GET" && parts is ["api", "latest"]) return Latest();
         // /api/items/<id>/image and /api/items/<id>/to-mac (the route name is shared with the macOS page)
         if (parts is not ["api", "items", var id, var action] || !Guid.TryParse(id, out var guid) || store.Find(guid) is not ClipboardItem item)
             return Response.Text("Not Found", 404);
@@ -151,17 +242,34 @@ internal sealed class PhoneShare
             case ("POST", "to-mac"):
                 putOnClipboard(item);
                 store.Bump(item.Id);
-                return Response.Text("{\"ok\":true}", type: "application/json");
+                return Response.Text("""{"ok":true}""", type: "application/json");
             default:
                 return Response.Text("Not Found", 404);
         }
     }
 
-    /// The newest text entry as plain text, for "Get Contents of URL" in iOS Shortcuts. 404 when there is none.
-    private Response Latest() =>
-        store.Items.FirstOrDefault(i => i.Kind.IsText()) is { Text: string text }
-            ? Response.Text(text)
-            : Response.Text("沒有文字紀錄", 404);
+    private sealed record LoginBody(string? Password, string? Device);
+
+    private Response Login(Request request)
+    {
+        LoginBody? body;
+        try { body = JsonSerializer.Deserialize<LoginBody>(request.Body, Json); }
+        catch (JsonException) { body = null; }
+        if (body?.Password is not string password) return Response.Text("Bad Request", 400);
+        return Auth.Login(password, body.Device ?? "", request.RemoteAddress) switch
+        {
+            PhoneShareAuth.LoginResult.Success success => Response.Text("""{"ok":true}""", type: "application/json") with
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["Set-Cookie"] = $"{PhoneShareAuth.CookieName}={success.Token}; Path=/; Max-Age={CookieMaxAge}; HttpOnly; SameSite=Strict",
+                },
+            },
+            PhoneShareAuth.LoginResult.WrongPassword wrong => Response.Text($$"""{"ok":false,"error":"wrong","remaining":{{wrong.Remaining}}}""", 401, "application/json"),
+            PhoneShareAuth.LoginResult.LockedOut locked => Response.Text($$"""{"ok":false,"error":"locked","seconds":{{locked.Seconds}}}""", 429, "application/json"),
+            _ => Response.Text("Bad Request", 400),
+        };
+    }
 
     /// Text or an image from the phone: recorded in history (source 手機) and put on this PC's clipboard.
     private async Task<Response> Receive(Request request)
@@ -182,7 +290,7 @@ internal sealed class PhoneShare
         }
         store.Add(snapshot);
         if (store.Items.FirstOrDefault() is ClipboardItem newest) putOnClipboard(newest);
-        return Response.Text("{\"ok\":true}", type: "application/json");
+        return Response.Text("""{"ok":true}""", type: "application/json");
     }
 
     /// JPEG/PNG/GIF/BMP through GDI+ (honouring the camera's EXIF rotation); anything else, such as HEIC from an iPhone,
@@ -279,12 +387,19 @@ internal sealed class PhoneShare
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())), 0, 8).ToLowerInvariant();
     }
 
-    private static byte[] LoadPage()
+    private static byte[] LoadResource(string name)
     {
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("SuYanShot.PhoneSharePage.html")
-                           ?? throw new InvalidOperationException("PhoneSharePage.html is not embedded.");
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)
+                           ?? throw new InvalidOperationException(name + " is not embedded.");
         using var reader = new MemoryStream();
         stream.CopyTo(reader);
         return reader.ToArray();
+    }
+
+    public void Dispose()
+    {
+        networkMonitor.Dispose();
+        server.Stop();
+        advertiser?.Dispose();
     }
 }

@@ -1,11 +1,14 @@
 <!doctype html>
-<!-- Ported from Sources/SuYanShot/Clipboard/PhoneSharePage.swift; only the wording "Mac" became "電腦". Keep the two in step. -->
+<!-- Ported from Sources/SuYanShot/Clipboard/PhoneSharePage.swift (html); only the wording "Mac" became "電腦". Keep the two in step. -->
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>素顏 Shot 剪貼簿</title>
+<meta name="apple-mobile-web-app-title" content="拾光">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>拾光剪貼簿</title>
 <style>
   :root {
     --bg: #f2f2f7; --card: #ffffff; --text: #1c1c1e; --muted: #8e8e93; --line: rgba(60,60,67,.12);
@@ -58,7 +61,7 @@
 </head>
 <body>
 <header>
-  <h1>剪貼簿</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between"><h1>剪貼簿</h1><button id="logout" class="chip">登出</button></div>
   <input id="search" type="search" placeholder="搜尋" autocomplete="off">
   <div id="chips"></div>
 </header>
@@ -74,13 +77,15 @@
 <div id="toast"></div>
 <div id="viewer"><img alt=""><p>長按圖片可以儲存或複製・點一下關閉</p></div>
 <script>
-const token = new URLSearchParams(location.search).get('t') || '';
 const state = { items: [], tags: [], version: '', filter: 'all', query: '', expired: false };
 const $ = (id) => document.getElementById(id);
 
-function api(path, options = {}) {
-  const sep = path.includes('?') ? '&' : '?';
-  return fetch(path + sep + 't=' + encodeURIComponent(token), options);
+// The session cookie goes along automatically; POSTs also carry a header cross-site forms can't add.
+async function api(path, options = {}) {
+  const headers = Object.assign({ 'X-Requested-With': 'glean' }, options.headers || {});
+  const response = await fetch(path, Object.assign({}, options, { headers, credentials: 'same-origin' }));
+  if (response.status === 401) { location.reload(); throw new Error('signed out'); }
+  return response;
 }
 
 function el(tag, className, text) {
@@ -103,16 +108,11 @@ async function load() {
   if (state.expired) return;
   try {
     const response = await api('/api/items?v=' + encodeURIComponent(state.version));
-    if (response.status === 403) { state.expired = true; showExpired(); return; }
     const data = await response.json();
     if (!data.unchanged) { state.items = data.items; state.tags = data.tags; state.version = data.version; render(); }
   } catch (e) { /* Computer asleep or off the network; try again on the next tick */ }
 }
 
-function showExpired() {
-  const list = $('list');
-  list.replaceChildren(el('div', 'empty', '連結已失效或分享已停止。請在電腦上重新打開「在手機上開啟」並掃描 QR code。'));
-}
 
 const builtIn = [['all', '全部'], ['favorites', '常用'], ['text', '文字'], ['image', '圖片'], ['file', '檔案']];
 const kindNames = { text: '文字', richText: '格式文字', image: '圖片', file: '檔案' };
@@ -178,7 +178,7 @@ function card(item) {
   if (item.kind === 'image') {
     const img = el('img', 'thumb');
     img.loading = 'lazy';
-    img.src = '/api/items/' + item.id + '/image?thumb=1&t=' + encodeURIComponent(token);
+    img.src = '/api/items/' + item.id + '/image?thumb=1';
     img.onclick = () => openViewer(item);
     c.append(img);
   } else if (item.kind === 'file') {
@@ -241,7 +241,7 @@ function copyText(item) {
 
 function openViewer(item) {
   const viewer = $('viewer');
-  viewer.querySelector('img').src = '/api/items/' + item.id + '/image?t=' + encodeURIComponent(token);
+  viewer.querySelector('img').src = '/api/items/' + item.id + '/image';
   viewer.classList.add('show');
 }
 $('viewer').onclick = (e) => { if (e.target.tagName !== 'IMG') $('viewer').classList.remove('show'); };
@@ -265,6 +265,12 @@ $('file').onchange = async (e) => {
   const r = await api('/api/send', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file });
   e.target.value = '';
   if (r.ok) { toast('已傳到電腦'); state.version = ''; load(); } else { toast('傳送失敗'); }
+};
+
+$('logout').onclick = async () => {
+  if (!confirm('要登出這台裝置嗎？下次要重新輸入密碼。')) return;
+  await api('/api/logout', { method: 'POST' }).catch(() => {});
+  location.reload();
 };
 
 load();

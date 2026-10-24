@@ -42,7 +42,7 @@ internal sealed class FloatingThumbnail : Form
         TopMost = true;
         DoubleBuffered = true;
         BackColor = Color.FromArgb(32, 32, 32);
-        Text = "素顏 Shot";
+        Text = "拾光";
 
         var scale = DpiOf(screen) / 96f;
         var width = (int)(CardWidth * scale);

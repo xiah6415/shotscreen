@@ -10,15 +10,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <AssemblyName>SuYanShot</AssemblyName>
+    <AssemblyName>Glean</AssemblyName>
     <RootNamespace>SuYanShot</RootNamespace>
-    <Product>素顏 Shot</Product>
-    <Version>0.1.0</Version>
+    <Product>拾光</Product>
+    <!-- One version for both apps: the repository's VERSION file. -->
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\..\..\VERSION').Trim())</Version>
+    <Company>拾光 / Glean</Company>
+    <ApplicationIcon>Resources\Glean.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="SuYanShot.Tests" />
     <EmbeddedResource Include="Clipboard\PhoneSharePage.html" LogicalName="SuYanShot.PhoneSharePage.html" />
+    <EmbeddedResource Include="Clipboard\PhoneShareLogin.html" LogicalName="SuYanShot.PhoneShareLogin.html" />
+    <!-- The macOS app icon, shared: tray icon, windows and the phone's Home Screen icon. -->
+    <EmbeddedResource Include="..\..\..\Resources\AppIcon.png" LogicalName="SuYanShot.AppIcon.png" />
   </ItemGroup>
 
 </Project>

@@ -1,21 +1,39 @@
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace SuYanShot.ClipboardHistory;
 
 /// Tiny HTTP/1.1 server (one request per connection) used to show clipboard history on a phone on the same network.
-/// Every request must carry the session token; connections from outside private address ranges are refused.
+/// Connections from outside private address ranges are refused; authentication is up to the handler (as on macOS).
 /// A raw TcpListener rather than HttpListener, because HttpListener needs administrator rights to listen beyond localhost.
 internal sealed class PhoneShareServer
 {
     internal sealed record Request(string Method, string Path, IReadOnlyDictionary<string, string> Query,
-                                   IReadOnlyDictionary<string, string> Headers, byte[] Body);
+                                   IReadOnlyDictionary<string, string> Headers, byte[] Body)
+    {
+        /// Client IP, for login rate limiting.
+        public string RemoteAddress { get; init; } = "?";
+
+        public IReadOnlyDictionary<string, string> Cookies
+        {
+            get
+            {
+                var result = new Dictionary<string, string>();
+                foreach (var part in (Headers.GetValueOrDefault("cookie") ?? "").Split(';'))
+                {
+                    var eq = part.IndexOf('=');
+                    if (eq > 0) result[part[..eq].Trim()] = part[(eq + 1)..].Trim();
+                }
+                return result;
+            }
+        }
+    }
 
     internal sealed record Response(int Status, string ContentType, byte[] Body)
     {
+        public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
+
         public static Response Text(string text, int status = 200, string type = "text/plain; charset=utf-8") =>
             new(status, type, Encoding.UTF8.GetBytes(text));
     }
@@ -31,14 +49,11 @@ internal sealed class PhoneShareServer
 
     public State Status { get; private set; } = State.Stopped;
     public int Port { get; private set; }
-    public string Token { get; private set; } = "";
     public string? Failure { get; private set; }
+    public bool FailedBecausePortInUse { get; private set; }
 
     /// Raised on the UI thread.
     public event Action? StateChanged;
-
-    /// Raised on the UI thread for every authenticated request.
-    public event Action? Activity;
 
     /// <param name="handler">Runs on the UI thread, so it may use the clipboard store directly.</param>
     public PhoneShareServer(Func<Request, Task<Response>> handler)
@@ -47,25 +62,27 @@ internal sealed class PhoneShareServer
     }
 
     /// Call on the UI thread; request handling is marshalled back to it.
-    /// Listens on <paramref name="preferredPort"/> so links stay the same; falls back to a free port if it is taken.
-    public void Start(int preferredPort, string token)
+    /// Listens on a fixed port so bookmarked / Home Screen links keep working (0 picks a free one, for tests).
+    public void Start(int port)
     {
         Stop();
         ui = SynchronizationContext.Current ?? ui;
-        Token = token;
         try
         {
-            listener = Listen(preferredPort);
+            listener = new TcpListener(IPAddress.Any, port);
+            listener.Start();
             Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             cancel = new CancellationTokenSource();
             _ = AcceptLoop(listener, cancel.Token);
             Status = State.Running;
             Failure = null;
+            FailedBecausePortInUse = false;
         }
         catch (SocketException ex)
         {
             Status = State.Failed;
             Failure = ex.Message;
+            FailedBecausePortInUse = ex.SocketErrorCode == SocketError.AddressAlreadyInUse;
             listener = null;
         }
         StateChanged?.Invoke();
@@ -79,33 +96,6 @@ internal sealed class PhoneShareServer
         if (Status == State.Stopped) return;
         Status = State.Stopped;
         StateChanged?.Invoke();
-    }
-
-    /// Invalidates links already handed out.
-    public void SetToken(string token)
-    {
-        Token = token;
-        StateChanged?.Invoke();
-    }
-
-    private static TcpListener Listen(int preferredPort)
-    {
-        if (preferredPort is > 0 and <= 65535)
-        {
-            var fixedPort = new TcpListener(IPAddress.Any, preferredPort);
-            try
-            {
-                fixedPort.Start();
-                return fixedPort;
-            }
-            catch (SocketException)
-            {
-                // Taken by another program; a new port means a new link, which PhoneShare saves.
-            }
-        }
-        var any = new TcpListener(IPAddress.Any, 0);
-        any.Start();
-        return any;
     }
 
     // MARK: Connections
@@ -132,6 +122,7 @@ internal sealed class PhoneShareServer
         using (client)
         {
             if (client.Client.RemoteEndPoint is not IPEndPoint remote || !IsLocal(remote.Address)) return;
+            var remoteAddress = (remote.Address.IsIPv4MappedToIPv6 ? remote.Address.MapToIPv4() : remote.Address).ToString();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             var stream = client.GetStream();
@@ -141,7 +132,7 @@ internal sealed class PhoneShareServer
                 response = await ReadRequest(stream, timeout.Token) switch
                 {
                     { Error: Response error } => error,
-                    { Request: Request request } => await OnUiThread(() => Route(request)),
+                    { Request: Request request } => await OnUiThread(() => handler(request with { RemoteAddress = remoteAddress })),
                     _ => Response.Text("Bad Request", 400),
                 };
             }
@@ -159,19 +150,6 @@ internal sealed class PhoneShareServer
         }
     }
 
-    private Task<Response> Route(Request request)
-    {
-        var supplied = request.Query.GetValueOrDefault("t") ?? request.Headers.GetValueOrDefault("x-token") ?? "";
-        if (Token.Length == 0 || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(Token)))
-        {
-            return Task.FromResult(Response.Text(
-                "<!doctype html><meta name=viewport content='width=device-width'><body style='font:17px -apple-system,sans-serif;padding:40px;text-align:center'>連結已失效，請在電腦上重新掃描 QR code。",
-                403, "text/html; charset=utf-8"));
-        }
-        Activity?.Invoke();
-        return handler(request);
-    }
-
     private Task<Response> OnUiThread(Func<Task<Response>> work)
     {
         var completion = new TaskCompletionSource<Response>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -187,11 +165,16 @@ internal sealed class PhoneShareServer
     {
         var reason = response.Status switch
         {
-            200 => "OK", 400 => "Bad Request", 403 => "Forbidden", 404 => "Not Found", 413 => "Payload Too Large", _ => "Internal Server Error",
+            200 => "OK", 303 => "See Other", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found",
+            413 => "Payload Too Large", 429 => "Too Many Requests", _ => "Internal Server Error",
         };
-        var head = $"HTTP/1.1 {response.Status} {reason}\r\nContent-Type: {response.ContentType}\r\nContent-Length: {response.Body.Length}\r\n" +
-                   "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n";
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(head), token);
+        var head = new StringBuilder();
+        head.Append($"HTTP/1.1 {response.Status} {reason}\r\n");
+        head.Append($"Content-Type: {response.ContentType}\r\nContent-Length: {response.Body.Length}\r\n");
+        head.Append("Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n");
+        foreach (var (name, value) in response.Headers) head.Append($"{name}: {value}\r\n");
+        head.Append("Connection: close\r\n\r\n");
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(head.ToString()), token);
         await stream.WriteAsync(response.Body, token);
     }
 
@@ -245,8 +228,6 @@ internal sealed class PhoneShareServer
 
     // MARK: Network helpers
 
-    internal static string MakeToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-
     /// Loopback, link-local and private (RFC 1918 / ULA) addresses only.
     internal static bool IsLocal(IPAddress address)
     {
@@ -257,33 +238,6 @@ internal sealed class PhoneShareServer
         return IPAddress.IsLoopback(address) || address.IsIPv6LinkLocal || (bytes[0] & 0xFE) == 0xFC;
     }
 
-    private static bool IsPrivate(byte[] b) =>
+    internal static bool IsPrivate(byte[] b) =>
         b.Length == 4 && (b[0] == 10 || b[0] == 127 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254));
-
-    private static readonly string[] VirtualAdapterHints = { "virtual", "hyper-v", "vmware", "virtualbox", "vethernet", "wsl", "bluetooth", "loopback", "tap-", "tailscale", "zerotier" };
-
-    /// This PC's IPv4 address on Wi-Fi/Ethernet that a phone on the same network can reach.
-    /// Prefers real adapters with a default gateway over virtual ones (Hyper-V, WSL, VPNs).
-    public static string? LocalIPv4Address()
-    {
-        var candidates = new List<(string Address, int Score)>();
-        foreach (var adapter in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (adapter.OperationalStatus != OperationalStatus.Up) continue;
-            if (adapter.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
-            var properties = adapter.GetIPProperties();
-            var label = (adapter.Name + " " + adapter.Description).ToLowerInvariant();
-            var isVirtual = VirtualAdapterHints.Any(label.Contains);
-            var hasGateway = properties.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any));
-            foreach (var unicast in properties.UnicastAddresses)
-            {
-                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-                var bytes = unicast.Address.GetAddressBytes();
-                if (!IsPrivate(bytes) || bytes[0] is 127 or 169) continue;
-                var score = (hasGateway ? 4 : 0) + (isVirtual ? 0 : 2) + (adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 1 : 0);
-                candidates.Add((unicast.Address.ToString(), score));
-            }
-        }
-        return candidates.OrderByDescending(c => c.Score).Select(c => c.Address).FirstOrDefault();
-    }
 }

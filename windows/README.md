@@ -1,7 +1,13 @@
-# 素顏 Shot for Windows
+# 拾光 / Glean for Windows
 
-The Windows port of 素顏 Shot. It lives in the same repository as the macOS app (repository root) and follows the same product
-rules: private, native, no subscription, cloud, account or third-party runtime dependency.
+The Windows port of 拾光 / Glean (formerly 素顏 Shot). It lives in the same repository as the macOS app (repository root) and
+follows the same product rules: private, native, no subscription, cloud, account or third-party runtime dependency.
+
+The exe is `Glean.exe` (product name 拾光, the shared icon from `Resources/AppIcon.png`, version from the repository's
+`VERSION` file). The C# project, namespaces and data folders keep the old `SuYanShot` name, the way the macOS app kept its bundle
+id, so history and settings carry over: `%APPDATA%\SuYanShot` (settings, shortcuts, phone-share login) and
+`%LOCALAPPDATA%\SuYanShot\Clipboard`. An existing 登入時啟動 entry is moved to the new exe on launch.
+`scripts/make-icon.ps1` rebuilds `Resources/Glean.ico` from the shared PNG.
 
 ## Requirements
 
@@ -17,6 +23,8 @@ dotnet build
 dotnet test
 dotnet run --project src/SuYanShot
 ```
+
+The built app is `src/SuYanShot/bin/Debug/net8.0-windows10.0.19041.0/Glean.exe`.
 
 The app lives in the notification area (system tray) and has no main window. Quit it from its menu.
 
@@ -42,7 +50,7 @@ annotation editor.
 The card closes after 8 s unless hovered. Saved files go to the Desktop as `Screenshot 2026-10-21 at 14.03.07.png`, the same
 naming as macOS.
 
-Tray menu also has 剪貼簿紀錄, 在手機上開啟…, 打開截圖資料夾 and 設定….
+Tray menu also has 剪貼簿紀錄, 手機分享 (switch), 手機分享設定…, 打開截圖資料夾 and 設定….
 
 ### 標註 (annotation editor)
 
@@ -73,36 +81,40 @@ ignore the simulated Ctrl+V (the entry is still on the clipboard). 常用 and ta
 
 Settings → 剪貼簿: on/off, keep 50/100/200/500, 清除一般紀錄…. Stored in `%APPDATA%\SuYanShot\settings.json`.
 
-### 在手機上開啟 (phone access)
+### 手機分享 (phone access)
 
-Same page and routes as macOS (`GET /`, `GET /api/items?v=`, `GET /api/items/<id>/image[?thumb=1]`,
-`POST /api/items/<id>/to-mac`, `POST /api/send`), with "Mac" worded as 電腦, plus `GET /api/latest` (newest text entry as
-plain text). The phone must be on the same network. A 128-bit token is required on every request, connections from
-non-private addresses are refused, and a request is capped at 40 MB.
+Same design as macOS (v0.3.x): a switch in the tray menu (手機分享) that is remembered and starts with the app, a fixed address
+`http://glean.local:8765/`, password login, and allowed networks. The tray icon gets a green dot while phones can connect, and
+the menu item shows why it is paused (要先設定密碼 / 暫停：不在允許的網路 / 等待網路 / 無法啟動). Turning it on without a password
+opens 手機分享設定….
 
-**Unlike macOS, sharing is a switch (tray → 手機連線) with a fixed link**, at the user's request, so it can be bookmarked or
-used from iOS Shortcuts: the port and token are created once and kept in `settings.json`, the switch is remembered across
-restarts, and there is no 30-minute idle stop. 換一組網址 replaces the token (old links and Shortcuts stop working). If the saved
-port is taken by another program a free one is used and saved. The link also changes when the PC's IP address changes, so a
-DHCP reservation on the router is recommended. 在手機上開啟… shows the QR code and the Shortcut addresses:
+- **Address.** `glean.local` is published over multicast DNS by a small built-in responder (`LocalNameAdvertiser`; Windows has
+  no public API for a bare host name). It probes first; if another device answers for the name it uses `glean-2`, `glean-3` …
+  The name can be changed in the settings window; keeping `glean` means one Home Screen shortcut works for every computer
+  running 拾光, Mac or PC. The IP address is shown as a fallback, and while the name is not published.
+- **Login.** The URL carries no secret. A device enters the password once (`POST /api/login`) and gets a one-year
+  `glean_session` cookie (HttpOnly, SameSite=Strict). Only hashes are stored, in `%APPDATA%\SuYanShot\phone-share-auth.json`:
+  PBKDF2-SHA256 (200,000 rounds) for the password, SHA-256 for session tokens. Five wrong passwords lock that address for a
+  minute; devices can be signed out one by one or all at once; changing the password signs everyone out. Every POST needs an
+  `X-Requested-With: glean` header, which cross-site forms cannot send.
+- **Networks.** With 只在允許的網路開放 (on by default), sharing runs only on networks in the list, identified by the router's MAC
+  address (via ARP), and pauses elsewhere; the network it was first turned on in is added automatically.
+- **Routes and pages** match macOS: `GET /` (login page until signed in), `/apple-touch-icon.png`, `/manifest.webmanifest`,
+  `POST /api/login`, `POST /api/logout`, `GET /api/items?v=`, `GET /api/items/<id>/image[?thumb=1]`,
+  `POST /api/items/<id>/to-mac`, `POST /api/send`. The pages are copies of the macOS ones with "Mac" worded as 電腦.
+  The earlier Windows-only token links and `/api/latest` are gone; add the page to the Home Screen instead.
 
-| iOS Shortcut ("Get Contents of URL") | Method | URL |
-| --- | --- | --- |
-| Send text to the PC | POST, body = text | `http://<ip>:<port>/api/send?t=<token>` |
-| Send a photo to the PC | POST, body = image file | `http://<ip>:<port>/api/send?t=<token>` |
-| Get the PC's newest text | GET | `http://<ip>:<port>/api/latest?t=<token>` |
-
-**The first time, Windows Defender Firewall asks whether SuYanShot may accept connections. Allow it on private networks**,
-otherwise the phone cannot reach the page. Photos from the phone are decoded by GDI+ (JPEG/PNG with EXIF rotation) or the
-Windows imaging codecs (HEIC needs the free HEIF extension from the Microsoft Store).
+**The first time sharing starts, Windows Defender Firewall asks whether 拾光 may accept connections. Allow it on private
+networks**, otherwise the phone cannot reach the page or resolve `glean.local`. Photos from the phone are decoded by GDI+
+(JPEG/PNG with EXIF rotation) or the Windows imaging codecs (HEIC needs the free HEIF extension from the Microsoft Store).
 
 ### 設定
 
 The settings window (tray menu → 設定…) has a recorder per action: click it, press the new combination. Esc cancels,
 Backspace clears. A shortcut needs Ctrl, Alt or Win plus a letter, digit or F-key; F1–F24 and `PrintScreen` can stand alone.
 A combination already used by another action moves to the new one. Changes apply immediately; combinations another program
-already owns are marked 已被其他程式使用. 還原預設 restores Ctrl+Shift+1–4. 登入 Windows 時自動啟動 adds/removes
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\SuYanShot`.
+already owns are marked 已被其他程式使用. 還原預設 restores the defaults. 登入 Windows 時自動啟動 adds/removes
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Glean`.
 
 Shortcuts are stored in `%APPDATA%\SuYanShot\shortcuts.json` (`{ "Region": "Ctrl+Shift+1", ... }`, `""` = cleared).
 Using bare `PrintScreen` needs Windows' own "Use the Print screen key to open screen capture" setting turned off.
@@ -121,11 +133,13 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
   canvas, and the editor window with its code-drawn toolbar.
 - `Shortcuts/` — `RegisterHotKey` wrapper, shortcut parsing and the JSON store.
 - `Clipboard/` (namespace `SuYanShot.ClipboardHistory`, to avoid clashing with WinForms' `Clipboard`) — model, store,
-  monitor, paster, feature, and phone sharing (`PhoneShareServer` = TcpListener HTTP server, `PhoneShare` = routes,
-  `PhoneSharePage.html` = embedded copy of the macOS page).
+  monitor, paster, feature, and phone sharing (`PhoneShareServer` = TcpListener HTTP server, `PhoneShare` = state and
+  routes, `PhoneShareAuth` = password and devices, `LocalNameAdvertiser` = mDNS responder, `HomeNetwork` = network
+  identity and change monitor, `PhoneSharePage.html` / `PhoneShareLogin.html` = embedded copies of the macOS pages).
 - `App/AppSettings.cs` — non-shortcut preferences.
 - `App/StartupRegistration.cs` — 登入時啟動 (per-user Run key).
 - `Storage/` — `ImageExporter` (naming / PNG policy) and clipboard.
+- `UI/AppIcon.cs` — the shared icon for the tray, windows and the phone's Home Screen.
 - `UI/` — preview card, countdown HUD, settings window and its shortcut recorder, clipboard panel, phone share window,
   and `QrCode.cs` (a small QR encoder, byte mode / level M, so no package is needed).
 - `Native/NativeMethods.cs` — all Win32 interop.
@@ -144,22 +158,24 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - Like macOS, a region stays within the monitor where the drag started.
 - **Phone server on TcpListener**, because `HttpListener` needs administrator rights (a URL ACL) to listen beyond localhost.
 - **Own QR encoder** instead of a NuGet package, keeping the app dependency-free. Verified by decoding its output with jsQR.
+- **Own mDNS responder** for `glean.local`: it shares UDP 5353 with Windows' own mDNS service (`SO_REUSEADDR`), answers only A
+  queries for its name, and probes before claiming it.
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 47 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 54 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
-  cleanup); HTTP parsing and private-address checks; and every phone route driven over loopback (403 without / with a wrong /
-  with a regenerated token, page, unchanged poll, text and JPEG upload, thumbnail and full image, to-mac, latest, 404, 400),
-  and the fixed link surviving a restart (same port and token, switch remembered, 換一組網址 saved); All-in-One resizing;
-  annotation state (undo/redo with crop, counters, text edit/clear, restyling and moving the selection) and the renderer
-  (every mark kind changes the flattened image, crop, hit testing). The flattened test image was also checked by eye.
+  cleanup); HTTP parsing and private-address checks; phone sharing over loopback (status for off / no password / other network /
+  no network / allowed, settings persisted; login page and public routes, X-Requested-With guard, wrong password count, cookie
+  attributes, hashed-only storage, every route signed in, forged cookie, logout, five-failure lockout, password change signing
+  everyone out); mDNS name sanitising, query/answer round trip and compressed names; All-in-One resizing; annotation state and
+  renderer.
+- Checked by hand on this PC (2026-10-24): Windows' own resolver (`Resolve-DnsName`) found the name published by the responder
+  at this PC's address, and with a simulated device already owning the name the responder backed off to `-2`.
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
-- The app was launched with the clipboard feature and stayed running.
-- Tried by the user: region / window / full-screen / delayed capture and the settings window (2026-10-21).
-- Tried by the user: clipboard history and phone access (2026-10-21).
-- Not yet tried by the user: phone switch with a fixed link / iOS Shortcuts, All-in-One, annotation editor.
+- Tried by the user: capture, settings window, clipboard history and the earlier token-based phone page (2026-10-21).
+- Not yet tried by the user: the rename, `glean.local` with password login from a real phone, All-in-One, annotation editor.
 
 ## Not yet ported
 
