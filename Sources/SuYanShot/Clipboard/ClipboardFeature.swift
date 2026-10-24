@@ -27,6 +27,12 @@ final class ClipboardFeature {
 
     func showPhoneShare() { phoneShareWindow.show() }
 
+    /// The menu switch. Turning it on without a password opens the settings so one can be set.
+    func togglePhoneShare() {
+        phoneShare.setEnabled(!phoneShare.isEnabled)
+        if phoneShare.isEnabled, !phoneShare.auth.hasPassword { phoneShareWindow.show() }
+    }
+
     private func paste(_ item: ClipboardItem, plainText: Bool) {
         monitor.ignore(changeCount: Paster.write(item, from: store, plainText: plainText))
         store.bump(item.id)
@@ -37,7 +43,7 @@ final class ClipboardFeature {
             PermissionsManager.requestAccessibility()
             let alert = NSAlert()
             alert.messageText = "已放回剪貼簿，按 ⌘V 就能貼上"
-            alert.informativeText = "想讓素顏 Shot 直接幫你貼上，到「系統設定 → 隱私權與安全性 → 輔助使用」打開素顏 Shot。"
+            alert.informativeText = "想讓拾光直接幫你貼上，到「系統設定 → 隱私權與安全性 → 輔助使用」打開拾光。"
             alert.addButton(withTitle: "打開系統設定")
             alert.addButton(withTitle: "好")
             NSApp.activate(ignoringOtherApps: true)

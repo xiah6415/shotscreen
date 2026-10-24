@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ScreenCaptureKit
 
 @MainActor
@@ -7,8 +8,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutStore = ShortcutStore()
     private let shortcuts = ShortcutManager()
     private let clipboard = ClipboardFeature()
+    private let updates = UpdateController()
     private var menuBarController: MenuBarController?
-    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings)
+    private var phoneShareObservation: AnyCancellable?
+    private lazy var settings = SettingsWindowController(store: shortcutStore, clipboard: clipboard.store, recording: coordinator.recordingSettings,
+                                                                updates: updates.settings, checkForUpdates: { [weak self] in self?.updates.checkNow() })
+    private lazy var welcome = WelcomeWindowController(shortcuts: shortcutStore, clipboard: clipboard.store)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -16,8 +21,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator: coordinator,
             openSettings: { [weak self] in self?.settings.show() },
             openClipboard: { [weak self] in self?.clipboard.togglePanel() },
-            openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() })
+            openPhoneShare: { [weak self] in self?.clipboard.showPhoneShare() },
+            togglePhoneShare: { [weak self] in self?.clipboard.togglePhoneShare() },
+            checkForUpdates: { [weak self] in self?.updates.checkNow() },
+            openWelcome: { [weak self] in self?.welcome.show() })
         coordinator.onRecordingChange = { [weak self] recording in self?.menuBarController?.setRecording(recording) }
+        phoneShareObservation = clipboard.phoneShare.$status.combineLatest(clipboard.phoneShare.$isEnabled).sink { [weak self] status, enabled in
+            let note: String? = switch status {
+            case .running: "分享中"
+            case .otherNetwork: "暫停：不在允許的網路"
+            case .needsPassword: "要先設定密碼"
+            case .noNetwork: "等待網路"
+            case .failed: "無法啟動"
+            case .off, .starting: nil
+            }
+            self?.menuBarController?.setPhoneShare(enabled: enabled, serving: status == .running, note: enabled ? note : nil)
+        }
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .region: self?.coordinator.captureRegion()
@@ -32,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
         applyShortcuts()
+        updates.isAppBusy = { [weak self] in self?.coordinator.isRecording ?? false }
+        updates.start()
+        if !WelcomeWindowController.isCompleted { welcome.show() }
     }
 
     /// Global hotkeys are paused while the settings window records a new shortcut.
@@ -60,6 +82,7 @@ final class CaptureCoordinator {
     let recordingSettings = RecordingSettings()
     private var recorder: ScreenRecorder?
     private let recordingHUD = RecordingHUD()
+    private let recordingStartBar = RecordingStartBar()
     private lazy var recordingPreview = RecordingPreviewController()
     /// Called with true when a recording starts and false when it ends.
     var onRecordingChange: ((Bool) -> Void)?
@@ -76,18 +99,22 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Region, scroll, window and full-screen capture from one overlay.
-    func captureAllInOne() {
+    /// Region, scroll, window and full-screen capture — and recording — from one overlay.
+    func captureAllInOne(mode: AllInOneMode = .capture) {
         if isScrollCapturing { finishScrolling(); return }
+        if isRecording { stopRecording(); return }
         guard ensurePermission() else { return }
-        allInOneSelector.begin { [weak self] action in
+        allInOneSelector.begin(mode: mode, recording: recordingSettings) { [weak self] action in
             guard let self, let action else { return }
             switch action {
             case let .capture(selection): self.capture(selection)
             case let .scroll(selection): self.startScrolling(selection)
             case .window: self.captureWindow()
             case let .fullScreen(screen): self.captureFullScreen(on: screen)
-            case let .record(selection): self.startRecording(on: selection.screen, selection: selection)
+            // The All-in-One toolbar already showed the sound options, so these start right away.
+            case let .record(selection): self.confirmRecording(.region(selection))
+            case let .recordFullScreen(screen): self.confirmRecording(.screen(screen))
+            case .recordWindow: self.pickWindowToRecord()
             }
         }
     }
@@ -114,10 +141,13 @@ final class CaptureCoordinator {
             do {
                 let windows = try await windowService.shareableWindows()
                 guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
-                windowPicker.begin(windows: windows) { [weak self] window in
-                    guard let self, let window else { return }
+                windowPicker.begin(windows: windows, listed: try await recordableWindows(), gridTitle: "選擇要截圖的視窗") { [weak self] picked in
+                    guard let self, let picked else { return }
                     Task { @MainActor in
-                        do { self.finish(try await self.windowService.capture(window)) } catch { self.present(error) }
+                        do {
+                            guard let window = try await self.bringOnScreen(picked) else { return }
+                            self.finish(try await self.windowService.capture(window))
+                        } catch { self.present(error) }
                     }
                 }
             } catch { present(error) }
@@ -177,7 +207,7 @@ final class CaptureCoordinator {
             PermissionsManager.requestAccessibility()
             let alert = NSAlert()
             alert.messageText = "自動捲動需要「輔助使用」權限"
-            alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開素顏 Shot，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"
+            alert.informativeText = "到「系統設定 → 隱私權與安全性 → 輔助使用」打開拾光，再按一次「自動捲動」。\n不開也可以繼續手動捲動。"
             alert.addButton(withTitle: "打開系統設定")
             alert.addButton(withTitle: "先手動捲")
             NSApp.activate(ignoringOtherApps: true)
@@ -216,48 +246,138 @@ final class CaptureCoordinator {
 
     // MARK: - Recording
 
-    /// Select a region and record it; while recording, stops instead.
-    func recordRegion() {
-        if isRecording { stopRecording(); return }
-        guard ensurePermission() else { return }
-        regionSelector.begin { [weak self] result in
-            guard let self, case let .success(selection) = result else { return }
-            self.startRecording(on: selection.screen, selection: selection)
-        }
+    private enum RecordingTarget {
+        case region(RegionSelection)
+        case screen(NSScreen)
+        case window(SCWindow)
     }
 
-    /// Records the screen under the pointer; while recording, stops instead.
+    /// Opens All-in-One in 錄影 mode: pick and adjust the region, check the sound, then 錄範圍.
+    /// While recording, stops instead.
+    func recordRegion() {
+        captureAllInOne(mode: .record)
+    }
+
+    /// Records the screen under the pointer after the start bar; while recording, stops instead.
     func recordFullScreen() {
         if isRecording { stopRecording(); return }
         guard ensurePermission(), let screen = NSScreen.underMouse else { return }
-        startRecording(on: screen, selection: nil)
+        recordingStartBar.show(region: nil, on: screen, settings: recordingSettings,
+                               onStart: { [weak self] in self?.confirmRecording(.screen(screen)) }, onCancel: {})
     }
 
-    private func startRecording(on screen: NSScreen, selection: RegionSelection?) {
+    /// Hover-pick a window, then the start bar (sound defaults to that window's app).
+    func recordWindow() {
+        if isRecording { stopRecording(); return }
+        guard ensurePermission() else { return }
+        pickWindowToRecord()
+    }
+
+    private func pickWindowToRecord() {
+        Task { @MainActor in
+            do {
+                let windows = try await windowService.shareableWindows()
+                guard !windows.isEmpty else { throw CaptureError.noShareableWindows }
+                windowPicker.begin(windows: windows, listed: try await recordableWindows(), gridTitle: "選擇要錄的視窗") { [weak self] picked in
+                    guard let self, let picked else { return }
+                    Task { @MainActor in
+                        guard let window = try? await self.bringOnScreen(picked) else { return }
+                        let screen = self.screen(containing: window) ?? NSScreen.underMouse ?? NSScreen.main!
+                        let appName = window.owningApplication?.applicationName ?? "這個 App"
+                        self.recordingStartBar.show(region: self.cocoaFrame(of: window), on: screen, settings: self.recordingSettings,
+                                                    windowAppName: appName,
+                                                    onStart: { [weak self] in self?.confirmRecording(.window(window)) }, onCancel: {})
+                    }
+                }
+            } catch { present(error) }
+        }
+    }
+
+    /// macOS can't capture windows on another desktop or minimized. For those, bring the app forward (which switches
+    /// to its desktop) and wait for the window to show up; a minimized window stays hidden, so explain instead.
+    private func bringOnScreen(_ window: SCWindow) async throws -> SCWindow? {
+        if window.isOnScreen { return window }
+        if let app = window.owningApplication { NSRunningApplication(processIdentifier: app.processID)?.activate() }
+        for _ in 0..<10 {
+            try await Task.sleep(for: .milliseconds(200))
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            if let shown = content.windows.first(where: { $0.windowID == window.windowID }) { return shown }
+        }
+        let alert = NSAlert()
+        alert.messageText = "「\(window.title ?? "這個視窗")」現在不在畫面上"
+        alert.informativeText = "它可能被縮小到 Dock 了。請先把它打開，再重新選一次。"
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        return nil
+    }
+
+    /// Normal app windows, including covered ones and those on other desktops, for the window dropdown.
+    private func recordableWindows() async throws -> [SCWindow] {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        let own = ProcessInfo.processInfo.processIdentifier
+        let systemApps: Set<String> = ["com.apple.WindowManager", "com.apple.dock", "com.apple.controlcenter", "com.apple.notificationcenterui"]
+        return content.windows.filter { window in
+            guard window.windowLayer == 0, window.frame.width >= 80, window.frame.height >= 60,
+                  let app = window.owningApplication, app.processID != own, !systemApps.contains(app.bundleIdentifier),
+                  !(window.title ?? "").isEmpty else { return false }
+            return true
+        }
+    }
+
+    /// Starts after the optional countdown.
+    private func confirmRecording(_ target: RecordingTarget) {
         guard !isRecording else { return }
         let begin = { [weak self] in
             guard let self else { return }
-            Task { @MainActor in await self.beginRecording(on: screen, selection: selection) }
+            Task { @MainActor in await self.beginRecording(target) }
         }
         if recordingSettings.countdown { countdown.start(seconds: 3, completion: begin) } else { begin() }
     }
 
-    private func beginRecording(on screen: NSScreen, selection: RegionSelection?) async {
+    private func beginRecording(_ target: RecordingTarget) async {
         do {
-            let display = try await display(for: screen)
-            let filter = try await captureService.displayFilter(for: display)
-            let scale = screen.backingScaleFactor
-            let pixelSize = selection.map { $0.sourceRectPixels.size } ?? CGSize(width: screen.frame.width * scale, height: screen.frame.height * scale)
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let options = recordingSettings.options
+            let filter: SCContentFilter
+            let sourceRect: CGRect?
+            let pixelSize: CGSize
+            let hudScreen: NSScreen
+            let hudRegion: CGRect?
+            switch target {
+            case let .region(selection):
+                let display = try await display(for: selection.screen)
+                filter = try await captureService.displayFilter(for: display)
+                sourceRect = selection.sourceRectPixels
+                pixelSize = selection.sourceRectPixels.size
+                hudScreen = selection.screen
+                hudRegion = selection.rectInScreenPoints.offsetBy(dx: selection.screen.frame.minX, dy: selection.screen.frame.minY)
+            case let .screen(screen):
+                let display = try await display(for: screen)
+                filter = try await captureService.displayFilter(for: display)
+                sourceRect = nil
+                pixelSize = CGSize(width: screen.frame.width * screen.backingScaleFactor, height: screen.frame.height * screen.backingScaleFactor)
+                hudScreen = screen
+                hudRegion = nil
+            case let .window(window):
+                // Follows the window even when it is covered or moved.
+                filter = SCContentFilter(desktopIndependentWindow: window)
+                sourceRect = nil
+                let scale = CGFloat(filter.pointPixelScale)
+                pixelSize = CGSize(width: window.frame.width * scale, height: window.frame.height * scale)
+                hudScreen = screen(containing: window) ?? NSScreen.underMouse ?? NSScreen.main!
+                hudRegion = nil
+            }
+            let audioFilter = try await soundFilter(for: target, content: content, enabled: options.systemAudio)
+
             let recorder = ScreenRecorder()
             recorder.onFailure = { [weak self] error in
                 self?.abortRecording()
                 self?.present(error)
             }
-            try await recorder.start(filter: filter, sourceRect: selection?.sourceRectPixels, pixelSize: pixelSize,
-                                     options: recordingSettings.options, to: try exporter.recordingURL())
+            try await recorder.start(filter: filter, sourceRect: sourceRect, pixelSize: pixelSize, options: options,
+                                     audioFilter: audioFilter, to: try exporter.recordingURL())
             self.recorder = recorder
-            let region = selection.map { $0.rectInScreenPoints.offsetBy(dx: $0.screen.frame.minX, dy: $0.screen.frame.minY) }
-            recordingHUD.show(region: region, on: screen,
+            recordingHUD.show(region: hudRegion, on: hudScreen,
                               onPause: { [weak recorder] paused in if paused { recorder?.pause() } else { recorder?.resume() } },
                               onStop: { [weak self] in self?.stopRecording() },
                               onCancel: { [weak self] in self?.cancelRecording() })
@@ -265,6 +385,37 @@ final class CaptureCoordinator {
         } catch {
             present(error)
         }
+    }
+
+    /// Whose sound to record. nil = whatever the video filter hears (all sound for display recordings).
+    /// A chosen app that isn't running stops the recording instead of silently recording everything.
+    private func soundFilter(for target: RecordingTarget, content: SCShareableContent, enabled: Bool) async throws -> SCContentFilter? {
+        guard enabled, let anyDisplay = content.displays.first else { return nil }
+        let own = ProcessInfo.processInfo.processIdentifier
+        let allSound = { SCContentFilter(display: anyDisplay, excludingApplications: content.applications.filter { $0.processID == own }, exceptingWindows: []) }
+        switch target {
+        case let .window(window):
+            guard recordingSettings.windowAudioFromAppOnly else { return allSound() }
+            guard let app = window.owningApplication else { return allSound() }
+            return SCContentFilter(display: anyDisplay, including: [app], exceptingWindows: [])
+        case .region, .screen:
+            guard let bundleID = recordingSettings.audioAppBundleID else { return nil }
+            guard let app = content.applications.first(where: { $0.bundleIdentifier == bundleID }) else {
+                throw RecordingSoundError.appNotRunning(RunningApp.name(for: bundleID))
+            }
+            return SCContentFilter(display: anyDisplay, including: [app], exceptingWindows: [])
+        }
+    }
+
+    private func screen(containing window: SCWindow) -> NSScreen? {
+        let frame = cocoaFrame(of: window)
+        return NSScreen.screens.max { $0.frame.intersection(frame).width * $0.frame.intersection(frame).height < $1.frame.intersection(frame).width * $1.frame.intersection(frame).height }
+    }
+
+    /// SCWindow frames are top-left-origin global points.
+    private func cocoaFrame(of window: SCWindow) -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return CGRect(x: window.frame.minX, y: primaryHeight - window.frame.maxY, width: window.frame.width, height: window.frame.height)
     }
 
     func stopRecording() {
@@ -306,8 +457,8 @@ final class CaptureCoordinator {
 
     private func showPermissionHelp() {
         let alert = NSAlert()
-        alert.messageText = "素顏 Shot 需要「螢幕錄製」權限"
-        alert.informativeText = "到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」打開素顏 Shot。\n打開之後要重新啟動 App 才會生效。"
+        alert.messageText = "拾光需要「螢幕錄製」權限"
+        alert.informativeText = "到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」打開拾光。\n打開之後要重新啟動 App 才會生效。"
         alert.addButton(withTitle: "打開系統設定")
         alert.addButton(withTitle: "重新啟動 App")
         alert.addButton(withTitle: "取消")

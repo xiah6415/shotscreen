@@ -57,6 +57,14 @@ final class ShortcutStore: ObservableObject {
         save()
     }
 
+    /// The default keys with ⌃⇧ instead of ⌘⇧: clear of macOS's screenshot keys and of app shortcuts
+    /// such as ⌘⇧V (paste and match style) and ⌘⇧R (reload / reader).
+    func useControlShiftDefaults() {
+        endRecording()
+        shortcuts = Self.defaults.mapValues { KeyShortcut(keyCode: $0.keyCode, modifiers: [.control, .shift], key: $0.key) }
+        save()
+    }
+
     func resetToDefaults() {
         endRecording()
         shortcuts = Self.defaults

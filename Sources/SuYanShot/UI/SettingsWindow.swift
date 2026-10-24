@@ -7,20 +7,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: ShortcutStore
     private let clipboard: ClipboardStore
     private let recording: RecordingSettings
+    private let updates: UpdateSettings
+    private let checkForUpdates: () -> Void
 
-    init(store: ShortcutStore, clipboard: ClipboardStore, recording: RecordingSettings) {
+    init(store: ShortcutStore, clipboard: ClipboardStore, recording: RecordingSettings, updates: UpdateSettings,
+         checkForUpdates: @escaping () -> Void) {
         self.store = store
         self.clipboard = clipboard
         self.recording = recording
+        self.updates = updates
+        self.checkForUpdates = checkForUpdates
     }
 
     func show() {
         if window == nil {
             let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "素顏 Shot 設定"
+            window.title = "拾光設定"
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard, recording: recording))
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, clipboard: clipboard, recording: recording,
+                                                                           updates: updates, checkForUpdates: checkForUpdates))
             window.setContentSize(window.contentView?.fittingSize ?? NSSize(width: 460, height: 320))
             window.center()
             self.window = window
@@ -36,10 +42,17 @@ private struct SettingsView: View {
     @ObservedObject var store: ShortcutStore
     @ObservedObject var clipboard: ClipboardStore
     @ObservedObject var recording: RecordingSettings
+    @ObservedObject var updates: UpdateSettings
+    let checkForUpdates: () -> Void
     @State private var confirmClear = false
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Toggle("開機時自動啟動", isOn: Binding(get: { launchAtLogin }, set: { LaunchAtLogin.set($0); launchAtLogin = LaunchAtLogin.isEnabled }))
+
+            Divider()
+
             Text("快捷鍵").font(.headline)
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
@@ -66,6 +79,8 @@ private struct SettingsView: View {
 
             HStack {
                 Spacer()
+                Button("改用 ⌃⇧ 組合") { store.useControlShiftDefaults() }
+                    .help("避開 macOS 的截圖鍵，以及 ⌘⇧V、⌘⇧R 這類 App 常用的組合")
                 Button("還原預設") { store.resetToDefaults() }
             }
 
@@ -108,6 +123,18 @@ private struct SettingsView: View {
                     .help(RecordingSettings.microphoneSupported ? "第一次會請你允許使用麥克風" : "需要 macOS 15 以上")
             }
             Text("影片存成 MP4 放在桌面，錄完可以在預覽卡片上轉成 GIF。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Text("更新").font(.headline)
+            HStack {
+                Toggle("自動檢查更新", isOn: $updates.automaticallyChecks)
+                Spacer()
+                Button("立即檢查") { checkForUpdates() }
+            }
+            Text("目前版本 \(AppVersion.current)。開啟 App 時和每天一次向 GitHub 查詢有沒有新版本，有的話會問你要不要更新。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

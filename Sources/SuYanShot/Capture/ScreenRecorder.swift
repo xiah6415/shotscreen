@@ -21,6 +21,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     private let queue = DispatchQueue(label: "SuYanShot.recording")
     private var stream: SCStream?
+    /// Separate audio-only stream used when sound is limited to some apps (video and sound filters differ).
+    private var audioStream: SCStream?
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var systemAudioInput: AVAssetWriterInput?
@@ -33,7 +35,10 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// Total paused time, subtracted from every sample after a pause.
     private var offset = CMTime.zero
 
-    func start(filter: SCContentFilter, sourceRect: CGRect?, pixelSize: CGSize, options: RecordingOptions, to url: URL) async throws {
+    /// `audioFilter`, when given, decides whose sound is recorded (e.g. a display filter including only one app);
+    /// otherwise sound comes from the video filter.
+    func start(filter: SCContentFilter, sourceRect: CGRect?, pixelSize: CGSize, options: RecordingOptions,
+               audioFilter: SCContentFilter? = nil, to url: URL) async throws {
         // Encoders need even dimensions.
         let width = max(2, Int(pixelSize.width) / 2 * 2)
         let height = max(2, Int(pixelSize.height) / 2 * 2)
@@ -46,7 +51,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         configuration.showsCursor = options.showsCursor
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.queueDepth = 6
-        configuration.capturesAudio = options.systemAudio
+        let separateAudio = options.systemAudio && audioFilter != nil
+        configuration.capturesAudio = options.systemAudio && !separateAudio
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
@@ -83,8 +89,25 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        if options.systemAudio { try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
+        if options.systemAudio && !separateAudio { try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
         if #available(macOS 15.0, *), options.microphone { try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue) }
+
+        var audioStream: SCStream?
+        if separateAudio, let audioFilter {
+            let audioConfiguration = SCStreamConfiguration()
+            // Video is required but unused here; keep it tiny and slow.
+            audioConfiguration.width = 2
+            audioConfiguration.height = 2
+            audioConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            audioConfiguration.capturesAudio = true
+            audioConfiguration.excludesCurrentProcessAudio = true
+            audioConfiguration.sampleRate = 48_000
+            audioConfiguration.channelCount = 2
+            let separate = SCStream(filter: audioFilter, configuration: audioConfiguration, delegate: self)
+            try separate.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue) // frames ignored below
+            try separate.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            audioStream = separate
+        }
 
         queue.sync {
             self.writer = writer
@@ -97,7 +120,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             self.offset = .zero
         }
         self.stream = stream
+        self.audioStream = audioStream
         try await stream.startCapture()
+        try await audioStream?.startCapture()
     }
 
     func pause() {
@@ -121,7 +146,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         // Take the end time before stopping the stream, which itself takes a moment.
         let stopTime = Self.now
         try? await stream?.stopCapture()
+        try? await audioStream?.stopCapture()
         stream = nil
+        audioStream = nil
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 guard let writer = self.writer, let url = self.outputURL else {
@@ -152,7 +179,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// Stops and deletes the partial file.
     func cancel() async {
         try? await stream?.stopCapture()
+        try? await audioStream?.stopCapture()
         stream = nil
+        audioStream = nil
         await withCheckedContinuation { continuation in
             queue.async {
                 self.writer?.cancelWriting()
@@ -169,6 +198,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         guard sampleBuffer.isValid, let writer, writer.status == .writing, !isPaused else { return }
         switch type {
         case .screen:
+            guard stream === self.stream else { return } // the audio-only stream's placeholder frames
             // Idle/blank frames carry no new image.
             guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
                   let rawStatus = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: rawStatus) == .complete else { return }

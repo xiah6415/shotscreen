@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Combine
 import SwiftUI
 
 enum AllInOneAction {
@@ -8,22 +9,27 @@ enum AllInOneAction {
     case record(RegionSelection)
     case window
     case fullScreen(NSScreen)
+    case recordWindow
+    case recordFullScreen(NSScreen)
 }
 
+enum AllInOneMode { case capture, record }
+
 /// CleanShot-style All-in-One overlay: drag out a region, adjust it (move / 8 handles), then pick an action
-/// from the toolbar. Return captures, S starts a scroll capture, double-click inside captures, Esc cancels.
+/// from the toolbar. Tab switches between 截圖 and 錄影 modes; in 錄影 mode the sound controls sit in the toolbar
+/// and nothing records until 錄範圍 / 錄視窗 / 錄全螢幕 is chosen. Return runs the main action, Esc cancels.
 @MainActor
 final class AllInOneSelector: NSObject {
     private var panels: [OverlayPanel] = []
     private var completion: ((AllInOneAction?) -> Void)?
 
-    func begin(completion: @escaping (AllInOneAction?) -> Void) {
+    func begin(mode: AllInOneMode = .capture, recording: RecordingSettings, completion: @escaping (AllInOneAction?) -> Void) {
         finish(nil)
         self.completion = completion
         NSApp.activate(ignoringOtherApps: true)
         panels = NSScreen.screens.map { screen in
             let panel = OverlayPanel(screen: screen)
-            let view = AllInOneView(screen: screen, selector: self)
+            let view = AllInOneView(screen: screen, selector: self, mode: mode, recording: recording)
             view.showsIdleToolbar = screen == NSScreen.underMouse
             panel.contentView = view
             panel.makeKeyAndOrderFront(nil)
@@ -53,6 +59,7 @@ final class AllInOneSelector: NSObject {
 
 private final class AllInOneToolbarModel: ObservableObject {
     @Published var hasSelection = false
+    @Published var mode: AllInOneMode = .capture
 }
 
 private final class AllInOneView: NSView {
@@ -72,24 +79,32 @@ private final class AllInOneView: NSView {
     private var pointer: CGPoint?
     private let model = AllInOneToolbarModel()
     private var toolbar: NSHostingView<AllInOneToolbar>!
-    private let toolbarSize = NSSize(width: 510, height: 56)
+    private var toolbarSize: NSSize { NSSize(width: AllInOneToolbar.width(for: model.mode), height: 56) }
     private let handleSize: CGFloat = 8
+    private var modeObservation: AnyCancellable?
 
-    init(screen: NSScreen, selector: AllInOneSelector) {
+    init(screen: NSScreen, selector: AllInOneSelector, mode: AllInOneMode, recording: RecordingSettings) {
         self.screen = screen
         self.selector = selector
         super.init(frame: CGRect(origin: .zero, size: screen.frame.size))
+        model.mode = mode
         toolbar = NSHostingView(rootView: AllInOneToolbar(
             model: model,
+            recording: recording,
             onCapture: { [weak self] in self?.perform(.capture) },
             onScroll: { [weak self] in self?.perform(.scroll) },
             onRecord: { [weak self] in self?.perform(.record) },
             onWindow: { [weak self] in self?.selector?.finish(.window) },
             onFullScreen: { [weak self] in self.map { $0.selector?.finish(.fullScreen($0.screen)) } },
+            onRecordWindow: { [weak self] in self?.selector?.finish(.recordWindow) },
+            onRecordFullScreen: { [weak self] in self.map { $0.selector?.finish(.recordFullScreen($0.screen)) } },
             onCancel: { [weak self] in self?.selector?.finish(nil) }
         ))
         addSubview(toolbar)
         layoutToolbar()
+        modeObservation = model.$mode.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.layoutToolbar() }
+        }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -242,7 +257,7 @@ private final class AllInOneView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = clamp(convert(event.locationInWindow, from: nil))
-        if let selection, event.clickCount == 2, selection.contains(point) { perform(.capture); return }
+        if let selection, event.clickCount == 2, selection.contains(point) { perform(model.mode == .capture ? .capture : .record); return }
         if let selection, let handle = handle(at: point) {
             drag = .resizing(handle, original: selection)
         } else if let selection, selection.contains(point) {
@@ -300,9 +315,12 @@ private final class AllInOneView: NSView {
     override func keyDown(with event: NSEvent) {
         switch Int(event.keyCode) {
         case kVK_Escape: selector?.finish(nil)
-        case kVK_Return, kVK_ANSI_KeypadEnter: perform(.capture)
-        case kVK_ANSI_S: perform(.scroll)
-        case kVK_ANSI_R: perform(.record)
+        case kVK_Tab: model.mode = model.mode == .capture ? .record : .capture
+        case kVK_Return, kVK_ANSI_KeypadEnter: perform(model.mode == .capture ? .capture : .record)
+        case kVK_ANSI_S where model.mode == .capture: perform(.scroll)
+        case kVK_ANSI_R:
+            // From 截圖 mode, R first shows the recording options instead of starting straight away.
+            if model.mode == .capture { model.mode = .record } else { perform(.record) }
         default: super.keyDown(with: event)
         }
     }
@@ -310,29 +328,52 @@ private final class AllInOneView: NSView {
 
 private struct AllInOneToolbar: View {
     @ObservedObject var model: AllInOneToolbarModel
+    @ObservedObject var recording: RecordingSettings
     let onCapture: () -> Void
     let onScroll: () -> Void
     let onRecord: () -> Void
     let onWindow: () -> Void
     let onFullScreen: () -> Void
+    let onRecordWindow: () -> Void
+    let onRecordFullScreen: () -> Void
     let onCancel: () -> Void
+
+    static func width(for mode: AllInOneMode) -> CGFloat { mode == .capture ? 520 : 800 }
 
     var body: some View {
         HStack(spacing: 2) {
-            ToolbarAction(title: "截圖", symbol: "camera.viewfinder", help: "截取選取範圍（Return）", action: onCapture)
-                .disabled(!model.hasSelection)
-            ToolbarAction(title: "捲動截圖", symbol: "scroll", help: "開始捲動截圖（S）", action: onScroll)
-                .disabled(!model.hasSelection)
-            ToolbarAction(title: "錄影", symbol: "record.circle", help: "錄下選取範圍（R）", action: onRecord)
-                .disabled(!model.hasSelection)
-            Divider().frame(height: 30).padding(.horizontal, 4)
-            ToolbarAction(title: "視窗", symbol: "macwindow", help: "改選一個視窗", action: onWindow)
-            ToolbarAction(title: "全螢幕", symbol: "display", help: "截取這個螢幕", action: onFullScreen)
+            Picker("", selection: $model.mode) {
+                Text("截圖").tag(AllInOneMode.capture)
+                Text("錄影").tag(AllInOneMode.record)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 110)
+            .padding(.trailing, 6)
+            .help("Tab 切換截圖 / 錄影")
+
+            if model.mode == .capture {
+                ToolbarAction(title: "截圖", symbol: "camera.viewfinder", help: "截取選取範圍（Return）", action: onCapture)
+                    .disabled(!model.hasSelection)
+                ToolbarAction(title: "捲動截圖", symbol: "scroll", help: "開始捲動截圖（S）", action: onScroll)
+                    .disabled(!model.hasSelection)
+                Divider().frame(height: 30).padding(.horizontal, 4)
+                ToolbarAction(title: "視窗", symbol: "macwindow", help: "改選一個視窗", action: onWindow)
+                ToolbarAction(title: "全螢幕", symbol: "display", help: "截取這個螢幕", action: onFullScreen)
+            } else {
+                ToolbarAction(title: "錄範圍", symbol: "record.circle", help: "開始錄選取範圍（Return）", action: onRecord)
+                    .disabled(!model.hasSelection)
+                ToolbarAction(title: "錄視窗", symbol: "macwindow", help: "選一個視窗來錄", action: onRecordWindow)
+                ToolbarAction(title: "錄全螢幕", symbol: "display", help: "錄這個螢幕", action: onRecordFullScreen)
+                Divider().frame(height: 30).padding(.horizontal, 4)
+                RecordingSoundControls(settings: recording)
+                    .padding(.horizontal, 4)
+            }
             Divider().frame(height: 30).padding(.horizontal, 4)
             ToolbarAction(title: "取消", symbol: "xmark", help: "取消（Esc）", action: onCancel)
         }
         .padding(.horizontal, 8)
-        .frame(width: 510, height: 56)
+        .frame(width: Self.width(for: model.mode), height: 56)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

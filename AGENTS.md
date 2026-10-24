@@ -1,4 +1,4 @@
-# Agent Guide — 素顏 Shot
+# Agent Guide — 拾光 / Glean (formerly 素顏 Shot)
 
 ## Project purpose
 Personal, native macOS screenshot tool: a durable replacement for the most-used CleanShot X workflows, not a commercial clone.
@@ -16,9 +16,10 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - `Shortcuts`: Carbon-based global hotkey registration.
 - `Models`: value types shared between modules.
 - `Clipboard`: clipboard history (Paste-style) — model, on-disk store, pasteboard monitor, paster, and phone sharing over the local network (`PhoneShareServer` = minimal Network.framework HTTP server, `PhoneShare` = routes, `PhoneSharePage` = the mobile web page); panel UI lives in `UI/ClipboardPanel.swift`, QR window in `UI/PhoneShareWindow.swift`.
+- `Update`: GitHub Releases check (`UpdateChecker`), preferences, and the verify-then-replace installer; the alerts live in `UI/UpdatePrompt.swift`. Releases are made with `scripts/release.sh` from the `VERSION` file.
 - `Annotation`: annotation editor — model (`AnnotationModel`), document/undo state, renderer shared by canvas and export, AppKit canvas, editor window.
 
-`Tests/SuYanShotTests` contains non-interactive unit tests. Keep UI orchestration out of capture and storage services.
+`Tests/SuYanShotTests` contains non-interactive unit tests. With Command Line Tools only, `scripts/test-stitcher.sh` is the runnable regression test; `scripts/make-app.sh` builds a universal (arm64 + x86_64) app. Keep UI orchestration out of capture and storage services.
 
 ## Coding rules
 - Prefer current native APIs and macOS 14 availability.
@@ -53,6 +54,6 @@ For an app bundle / signed distribution, create an Xcode project from the packag
 4. State precisely which interactive checks were actually performed.
 
 ## Modules not to change casually
-- `Capture/ScrollStitcher.swift`: offset matching and stitching; re-run the synthetic stitching test (see `memory.md`) after changing it.
+- `Capture/ScrollStitcher.swift`: offset matching and stitching; run `scripts/test-stitcher.sh` after changing it.
 - `Models/CaptureModels.swift`: coordinates and scale contracts shared by capture services.
 - `Storage/ImageExporter.swift`: owns naming/export policy; keep that policy out of UI.

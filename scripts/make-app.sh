@@ -1,26 +1,55 @@
 #!/bin/zsh
 # Build SuYanShot in release mode and package it as a menu-bar .app bundle.
 #
-#   scripts/make-app.sh            # build to .build/app/素顏 Shot.app
+#   scripts/make-app.sh            # build to .build/app/Glean.app (shown as 拾光 on Chinese systems)
 #   scripts/make-app.sh --install  # also copy to /Applications and relaunch
 set -euo pipefail
 
-APP_NAME="素顏 Shot"
+APP_NAME="Glean"
+# Shown by Finder, Launchpad and Spotlight when the system language is Chinese.
+DISPLAY_NAME_ZH="拾光"
+# Older builds were installed under this name; --install removes them.
+OLD_APP_NAMES=("素顏 Shot")
 EXECUTABLE="SuYanShot"
 BUNDLE_ID="local.suyanshot.app"
-VERSION="0.1.0"
-
 ROOT="${0:A:h:h}"
 cd "$ROOT"
+# The one place the version lives; scripts/release.sh tags releases with it and the app compares it with GitHub.
+VERSION="$(tr -d '[:space:]' < VERSION)"
 
-echo "→ Building release binary"
-swift build -c release --product "$EXECUTABLE"
-BIN_DIR="$(swift build -c release --show-bin-path)"
+# Universal binary: Apple Silicon + Intel. `--arch a --arch b` needs full Xcode, so build each slice
+# separately (Command Line Tools can cross-compile) and join them with lipo.
+UNIVERSAL="$ROOT/.build/app/universal"
+mkdir -p "$UNIVERSAL"
+SLICES=()
+for arch in arm64 x86_64; do
+    echo "→ Building release binary ($arch)"
+    swift build -c release --product "$EXECUTABLE" --arch "$arch" --scratch-path "$ROOT/.build/$arch"
+    SLICES+=("$(swift build -c release --arch "$arch" --scratch-path "$ROOT/.build/$arch" --show-bin-path)/$EXECUTABLE")
+done
+lipo -create "${SLICES[@]}" -output "$UNIVERSAL/$EXECUTABLE"
+BIN_DIR="$UNIVERSAL"
 
 APP="$ROOT/.build/app/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
+
+echo "→ Building app icon"
+ICONSET="$ROOT/.build/app/AppIcon.iconset"
+rm -rf "$ICONSET"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+    sips -z $size $size Resources/AppIcon.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    sips -z $((size * 2)) $((size * 2)) Resources/AppIcon.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET"
+
+for region in zh-Hant zh_TW zh-Hant-TW; do
+    mkdir -p "$APP/Contents/Resources/$region.lproj"
+    printf 'CFBundleDisplayName = "%s";\nCFBundleName = "%s";\n' "$DISPLAY_NAME_ZH" "$DISPLAY_NAME_ZH" > "$APP/Contents/Resources/$region.lproj/InfoPlist.strings"
+done
 
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
@@ -35,6 +64,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSHasLocalizedDisplayName</key>
+    <true/>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleExecutable</key>
     <string>$EXECUTABLE</string>
     <key>CFBundlePackageType</key>
@@ -50,11 +85,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>素顏 Shot 需要螢幕錄製權限才能截圖。</string>
+    <string>拾光需要螢幕錄製權限才能截圖和錄影。</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>素顏 Shot 在你打開「錄麥克風」時，把你的聲音錄進影片。</string>
+    <string>拾光在你打開「錄麥克風」時，把你的聲音錄進影片。</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>素顏 Shot 會在你按「在手機上開啟」時，讓同一個網路裡的手機看到剪貼簿紀錄。</string>
+    <string>拾光會在你按「在手機上開啟」時，讓同一個網路裡的手機看到剪貼簿紀錄。</string>
 </dict>
 </plist>
 PLIST
@@ -79,6 +114,9 @@ if [[ "${1:-}" == "--install" ]]; then
     # Wait for the old instance to exit, or `open` below can fail with error -600.
     for _ in {1..50}; do pgrep -x "$EXECUTABLE" >/dev/null || break; sleep 0.1; done
     rm -rf "$DEST"
+    for old in "${OLD_APP_NAMES[@]}"; do
+        [[ -d "/Applications/$old.app" ]] && rm -rf "/Applications/$old.app" && echo "✓ Removed old /Applications/$old.app"
+    done
     cp -R "$APP" "$DEST"
     echo "✓ Installed $DEST"
     # LaunchServices can still report the old instance for a moment (error -600); retry once.

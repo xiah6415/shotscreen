@@ -12,7 +12,7 @@ enum ShortcutAction: Int, CaseIterable {
         case .scroll: "捲動截圖"
         case .allInOne: "All-in-One"
         case .clipboard: "剪貼簿紀錄"
-        case .record: "框選錄影（錄影中按一下停止）"
+        case .record: "錄影（錄影中按一下停止）"
         }
     }
 }

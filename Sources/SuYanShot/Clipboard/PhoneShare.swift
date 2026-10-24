@@ -1,89 +1,195 @@
 import AppKit
 import CryptoKit
 
-/// Serves the clipboard history to a phone browser on the same network, and accepts text/images sent back.
-/// Runs only after the user starts it, and stops by itself after 30 idle minutes.
+/// Serves the clipboard history to phones on the same network at a fixed address (`http://glean.local:8765`,
+/// published over Bonjour), and accepts text/images sent back. A switch in the menu turns it on and it then
+/// starts with the app. Devices sign in once with a password; it only runs on networks the user allowed.
 @MainActor
 final class PhoneShare: ObservableObject {
-    @Published private(set) var isRunning = false
-    @Published private(set) var url: URL?
-    @Published private(set) var problem: String?
-    @Published private(set) var lastActivity: Date?
+    enum Status: Equatable {
+        case off
+        case needsPassword
+        case noNetwork
+        case otherNetwork
+        case starting
+        case running
+        case failed(String)
+    }
 
-    static let idleLimit: TimeInterval = 30 * 60
+    static let port: UInt16 = 8765
+
+    @Published private(set) var status: Status = .off
+    @Published private(set) var isEnabled: Bool
+    @Published private(set) var localName: String
+    @Published private(set) var restrictToHomeNetworks: Bool
+    @Published private(set) var homeNetworks: [NetworkIdentity]
+    @Published private(set) var currentNetwork: NetworkIdentity?
+    @Published private(set) var publishedName: String?
+    @Published private(set) var address: String?
+    @Published private(set) var lastActivity: Date?
+    let auth = PhoneShareAuth()
+    /// Tells the menu bar whether sharing is live.
+    var onServingChange: ((Bool) -> Void)?
+
+    var isServing: Bool { status == .running }
+    /// The address to bookmark: same on every Mac running 拾光 with the default name.
+    var url: URL? { publishedName.flatMap { URL(string: "http://\($0):\(Self.port)/") } }
+    /// Fallback if the phone can't resolve .local names.
+    var ipURL: URL? { address.flatMap { URL(string: "http://\($0):\(Self.port)/") } }
 
     private let store: ClipboardStore
     /// Puts an entry on the Mac's pasteboard (without recording it again).
     private let putOnMacClipboard: (ClipboardItem) -> Void
+    private let defaults: UserDefaults
     private lazy var server = PhoneShareServer { [weak self] request in
         self?.handle(request) ?? .text("Not Found", status: 404)
     }
-    private var idleTimer: Timer?
+    private let advertiser = LocalNameAdvertiser()
+    private let networkMonitor = NetworkChangeMonitor()
+    private var touchIcon: Data?
 
-    init(store: ClipboardStore, putOnMacClipboard: @escaping (ClipboardItem) -> Void) {
+    init(store: ClipboardStore, defaults: UserDefaults = .standard, putOnMacClipboard: @escaping (ClipboardItem) -> Void) {
         self.store = store
+        self.defaults = defaults
         self.putOnMacClipboard = putOnMacClipboard
+        isEnabled = defaults.bool(forKey: "phoneShareEnabled")
+        localName = LocalNameAdvertiser.sanitize(defaults.string(forKey: "phoneShareName") ?? "glean")
+        restrictToHomeNetworks = defaults.object(forKey: "phoneShareHomeOnly") as? Bool ?? true
+        homeNetworks = (defaults.data(forKey: "phoneShareHomeNetworks")).flatMap { try? JSONDecoder().decode([NetworkIdentity].self, from: $0) } ?? []
         server.onStateChange = { [weak self] in self?.serverStateChanged() }
-        server.onActivity = { [weak self] in
-            self?.lastActivity = .now
-            self?.scheduleIdleStop()
+        advertiser.onChange = { [weak self] name in self?.publishedName = name }
+        networkMonitor.onChange = { [weak self] in self?.refresh() }
+        networkMonitor.start()
+        refresh()
+    }
+
+    // MARK: - Settings
+
+    func setEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+        defaults.set(enabled, forKey: "phoneShareEnabled")
+        // First time on: trust the network the Mac is on now.
+        if enabled, restrictToHomeNetworks, homeNetworks.isEmpty, let network = NetworkIdentity.current() {
+            allow(network)
         }
+        refresh()
     }
 
-    func start() {
-        guard !isRunning else { return }
-        problem = nil
-        server.start()
-        scheduleIdleStop()
+    func setLocalName(_ name: String) {
+        localName = LocalNameAdvertiser.sanitize(name)
+        defaults.set(localName, forKey: "phoneShareName")
+        refresh()
     }
 
-    func stop() {
-        idleTimer?.invalidate()
-        idleTimer = nil
+    func setRestrictToHomeNetworks(_ restrict: Bool) {
+        restrictToHomeNetworks = restrict
+        defaults.set(restrict, forKey: "phoneShareHomeOnly")
+        refresh()
+    }
+
+    func allowCurrentNetwork() {
+        if let network = NetworkIdentity.current() { allow(network) }
+        refresh()
+    }
+
+    func removeNetwork(_ id: String) {
+        homeNetworks.removeAll { $0.id == id }
+        saveNetworks()
+        refresh()
+    }
+
+    func setPassword(_ password: String) {
+        auth.setPassword(password)
+        refresh()
+    }
+
+    private func allow(_ network: NetworkIdentity) {
+        guard !homeNetworks.contains(where: { $0.id == network.id }) else { return }
+        homeNetworks.append(network)
+        saveNetworks()
+    }
+
+    private func saveNetworks() {
+        if let data = try? JSONEncoder().encode(homeNetworks) { defaults.set(data, forKey: "phoneShareHomeNetworks") }
+    }
+
+    // MARK: - Running
+
+    /// Starts or stops serving to match the switch, the password and the current network.
+    private func refresh() {
+        currentNetwork = NetworkIdentity.current()
+        guard isEnabled else { stopServing(.off); return }
+        guard auth.hasPassword else { stopServing(.needsPassword); return }
+        guard let currentNetwork, let address = PhoneShareServer.localIPv4Address() else { stopServing(.noNetwork); return }
+        if restrictToHomeNetworks, !homeNetworks.contains(where: { $0.id == currentNetwork.id }) { stopServing(.otherNetwork); return }
+        self.address = address
+        switch server.state {
+        case .stopped, .failed:
+            setStatus(.starting)
+            server.start(port: Self.port)
+        case .starting, .running:
+            break
+        }
+        advertiser.publish(name: localName, address: address)
+    }
+
+    private func stopServing(_ reason: Status) {
         server.stop()
+        advertiser.stop()
+        address = nil
+        setStatus(reason)
     }
 
-    func regenerateLink() {
-        server.regenerateToken()
+    private func setStatus(_ new: Status) {
+        let wasServing = isServing
+        status = new
+        if wasServing != isServing { onServingChange?(isServing) }
     }
 
     private func serverStateChanged() {
         switch server.state {
-        case let .running(port):
-            isRunning = true
-            if let address = PhoneShareServer.localIPv4Address() {
-                url = URL(string: "http://\(address):\(port)/?t=\(server.token)")
-                problem = nil
-            } else {
-                url = nil
-                problem = "找不到區域網路位址，請確認這台 Mac 已連上 Wi-Fi 或有線網路。"
-            }
+        case .running:
+            setStatus(.running)
         case let .failed(message):
-            isRunning = false
-            url = nil
-            problem = "無法開始分享：\(message)"
-        case .stopped:
-            isRunning = false
-            url = nil
-        case .starting:
+            let inUse = message.localizedCaseInsensitiveContains("in use")
+            setStatus(.failed(inUse ? "\(Self.port) 埠被其他程式佔用了。" : message))
+        case .stopped, .starting:
             break
-        }
-    }
-
-    private func scheduleIdleStop() {
-        idleTimer?.invalidate()
-        idleTimer = Timer.scheduledTimer(withTimeInterval: Self.idleLimit, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
         }
     }
 
     // MARK: - Routes
 
+    private static let cookieMaxAge = 365 * 24 * 60 * 60
+
     private func handle(_ request: PhoneShareServer.Request) -> PhoneShareServer.Response {
         let parts = request.path.split(separator: "/").map(String.init)
         let method = request.method
+
+        // Public: what the login page and Home Screen need.
+        if method == "GET", parts == ["apple-touch-icon.png"] { return touchIconResponse() }
+        if method == "GET", parts == ["manifest.webmanifest"] {
+            return .text(##"{"name":"拾光剪貼簿","short_name":"拾光","start_url":"/","display":"standalone","background_color":"#000000","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}"##,
+                         type: "application/manifest+json")
+        }
+        if method == "POST" {
+            // Cross-site forms can't set custom headers without a CORS preflight, which this server never answers.
+            guard request.headers["x-requested-with"] == "glean" else { return .text("Forbidden", status: 403) }
+        }
+        if method == "POST", parts == ["api", "login"] { return login(request) }
+
+        let device = request.cookies[PhoneShareAuth.cookieName].flatMap { auth.device(forToken: $0) }
         if method == "GET", parts.isEmpty {
-            return .text(PhoneSharePage.html, type: "text/html; charset=utf-8")
+            return .text(device == nil ? PhoneSharePage.loginHTML : PhoneSharePage.html, type: "text/html; charset=utf-8")
+        }
+        guard let device else { return .text(#"{"ok":false,"error":"login"}"#, status: 401, type: "application/json") }
+        lastActivity = .now
+
+        if method == "POST", parts == ["api", "logout"] {
+            auth.revoke(device.id)
+            var response = PhoneShareServer.Response.text(#"{"ok":true}"#, type: "application/json")
+            response.headers["Set-Cookie"] = "\(PhoneShareAuth.cookieName)=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+            return response
         }
         if method == "GET", parts == ["api", "items"] {
             return itemsResponse(knownVersion: request.query["v"])
@@ -107,10 +213,47 @@ final class PhoneShare: ObservableObject {
         case ("POST", "to-mac"):
             putOnMacClipboard(item)
             store.bump(item.id)
-            return .text("{\"ok\":true}", type: "application/json")
+            return .text(#"{"ok":true}"#, type: "application/json")
         default:
             return .text("Not Found", status: 404)
         }
+    }
+
+    private struct LoginBody: Decodable {
+        let password: String
+        let device: String?
+    }
+
+    private func login(_ request: PhoneShareServer.Request) -> PhoneShareServer.Response {
+        guard let body = try? JSONDecoder().decode(LoginBody.self, from: request.body) else { return .text("Bad Request", status: 400) }
+        switch auth.login(password: body.password, deviceName: body.device ?? "", from: request.remoteAddress) {
+        case let .success(token):
+            var response = PhoneShareServer.Response.text(#"{"ok":true}"#, type: "application/json")
+            response.headers["Set-Cookie"] = "\(PhoneShareAuth.cookieName)=\(token); Path=/; Max-Age=\(Self.cookieMaxAge); HttpOnly; SameSite=Strict"
+            return response
+        case let .wrongPassword(remaining):
+            return .text(#"{"ok":false,"error":"wrong","remaining":\#(remaining)}"#, status: 401, type: "application/json")
+        case let .lockedOut(seconds):
+            return .text(#"{"ok":false,"error":"locked","seconds":\#(seconds)}"#, status: 429, type: "application/json")
+        }
+    }
+
+    /// 180 px PNG of the app icon for "Add to Home Screen".
+    private func touchIconResponse() -> PhoneShareServer.Response {
+        let bundled = Bundle.main.url(forResource: "AppIcon", withExtension: "icns").flatMap(NSImage.init(contentsOf:))
+        if touchIcon == nil, let icon = bundled ?? NSApp.applicationIconImage {
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 180, pixelsHigh: 180, bitsPerSample: 8, samplesPerPixel: 4,
+                                       hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+            if let rep {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                icon.draw(in: NSRect(x: 0, y: 0, width: 180, height: 180))
+                NSGraphicsContext.restoreGraphicsState()
+                touchIcon = rep.representation(using: .png, properties: [:])
+            }
+        }
+        guard let touchIcon else { return .text("Not Found", status: 404) }
+        return PhoneShareServer.Response(status: 200, contentType: "image/png", body: touchIcon)
     }
 
     private func item(_ id: String) -> ClipboardItem? {

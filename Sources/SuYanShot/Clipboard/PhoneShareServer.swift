@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// Tiny HTTP/1.1 server (one request per connection) used to show clipboard history on a phone on the same network.
-/// Every request must carry the session token; connections from outside private address ranges are refused.
+/// Connections from outside private address ranges are refused; authentication is up to the handler.
 @MainActor
 final class PhoneShareServer {
     struct Request {
@@ -11,12 +11,24 @@ final class PhoneShareServer {
         let query: [String: String]
         let headers: [String: String]
         let body: Data
+        /// Client IP, for login rate limiting.
+        let remoteAddress: String
+
+        var cookies: [String: String] {
+            var result: [String: String] = [:]
+            for part in (headers["cookie"] ?? "").split(separator: ";") {
+                let pair = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                if pair.count == 2 { result[pair[0]] = pair[1] }
+            }
+            return result
+        }
     }
 
     struct Response {
         var status: Int
         var contentType: String
         var body: Data
+        var headers: [String: String] = [:]
 
         static func text(_ string: String, status: Int = 200, type: String = "text/plain; charset=utf-8") -> Response {
             Response(status: status, contentType: type, body: Data(string.utf8))
@@ -31,10 +43,7 @@ final class PhoneShareServer {
     }
 
     private(set) var state: State = .stopped { didSet { onStateChange?() } }
-    private(set) var token = ""
     var onStateChange: (() -> Void)?
-    /// Called for every authenticated request.
-    var onActivity: (() -> Void)?
 
     private let handler: (Request) -> Response
     private var listener: NWListener?
@@ -42,12 +51,14 @@ final class PhoneShareServer {
 
     init(handler: @escaping (Request) -> Response) { self.handler = handler }
 
-    func start() {
+    /// Listens on a fixed port so bookmarked / Home Screen links keep working.
+    func start(port: UInt16) {
         stop()
-        token = Self.makeToken()
         state = .starting
         do {
-            let listener = try NWListener(using: .tcp, on: .any)
+            let parameters = NWParameters.tcp
+            parameters.allowLocalEndpointReuse = true
+            let listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port) ?? .any)
             listener.newConnectionHandler = { [weak self] connection in
                 MainActor.assumeIsolated { self?.accept(connection) }
             }
@@ -74,21 +85,15 @@ final class PhoneShareServer {
         if state != .stopped { state = .stopped }
     }
 
-    /// Invalidates links already handed out.
-    func regenerateToken() {
-        token = Self.makeToken()
-        onStateChange?()
-    }
-
     // MARK: - Connections
 
     private func accept(_ connection: NWConnection) {
         guard Self.isLocal(connection.endpoint) else { connection.cancel(); return }
         connection.start(queue: .main)
-        receive(on: connection, buffer: Data())
+        receive(on: connection, buffer: Data(), remote: Self.address(of: connection.endpoint))
     }
 
-    private func receive(on connection: NWConnection, buffer: Data) {
+    private func receive(on connection: NWConnection, buffer: Data, remote: String) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
             MainActor.assumeIsolated {
                 guard let self else { connection.cancel(); return }
@@ -98,35 +103,28 @@ final class PhoneShareServer {
                     self.send(.text("太大了", status: 413), on: connection)
                     return
                 }
-                switch Self.parse(buffer) {
+                switch Self.parse(buffer, remote: remote) {
                 case .incomplete:
-                    if isComplete || error != nil { connection.cancel() } else { self.receive(on: connection, buffer: buffer) }
+                    if isComplete || error != nil { connection.cancel() } else { self.receive(on: connection, buffer: buffer, remote: remote) }
                 case .invalid:
                     self.send(.text("Bad Request", status: 400), on: connection)
                 case let .request(request):
-                    self.send(self.route(request), on: connection)
+                    self.send(self.handler(request), on: connection)
                 }
             }
         }
     }
 
-    private func route(_ request: Request) -> Response {
-        let supplied = request.query["t"] ?? request.headers["x-token"] ?? ""
-        guard !token.isEmpty, supplied == token else {
-            return .text("<!doctype html><meta name=viewport content='width=device-width'><body style='font:17px -apple-system;padding:40px;text-align:center'>連結已失效，請在 Mac 上重新掃描 QR code。",
-                         status: 403, type: "text/html; charset=utf-8")
-        }
-        onActivity?()
-        return handler(request)
-    }
-
     private func send(_ response: Response, on connection: NWConnection) {
-        let reason = [200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 413: "Payload Too Large", 500: "Internal Server Error"][response.status] ?? "OK"
+        let reason = [200: "OK", 303: "See Other", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+                      413: "Payload Too Large", 429: "Too Many Requests", 500: "Internal Server Error"][response.status] ?? "OK"
         var head = "HTTP/1.1 \(response.status) \(reason)\r\n"
         head += "Content-Type: \(response.contentType)\r\n"
         head += "Content-Length: \(response.body.count)\r\n"
         head += "Cache-Control: no-store\r\n"
         head += "X-Content-Type-Options: nosniff\r\n"
+        head += "X-Frame-Options: DENY\r\n"
+        for (name, value) in response.headers { head += "\(name): \(value)\r\n" }
         head += "Connection: close\r\n\r\n"
         connection.send(content: Data(head.utf8) + response.body, completion: .contentProcessed { _ in connection.cancel() })
     }
@@ -139,7 +137,7 @@ final class PhoneShareServer {
         case request(Request)
     }
 
-    private static func parse(_ buffer: Data) -> Parsed {
+    private static func parse(_ buffer: Data, remote: String) -> Parsed {
         guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else { return .incomplete }
         guard let head = String(data: buffer[..<headerEnd.lowerBound], encoding: .utf8) else { return .invalid }
         var lines = head.components(separatedBy: "\r\n")
@@ -157,13 +155,14 @@ final class PhoneShareServer {
         var query: [String: String] = [:]
         for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
         return .request(Request(method: String(requestLine[0]), path: components.path, query: query, headers: headers,
-                                body: buffer.subdata(in: bodyStart..<(bodyStart + length))))
+                                body: buffer.subdata(in: bodyStart..<(bodyStart + length)), remoteAddress: remote))
     }
 
     // MARK: - Network helpers
 
-    private static func makeToken() -> String {
-        (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+    private static func address(of endpoint: NWEndpoint) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "?" }
+        return "\(host)"
     }
 
     /// Loopback, link-local and private (RFC 1918 / ULA) addresses only.

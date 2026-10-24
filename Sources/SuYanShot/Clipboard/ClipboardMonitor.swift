@@ -51,7 +51,7 @@ final class ClipboardMonitor {
         let source = NSWorkspace.shared.frontmostApplication
         if let bundleID = source?.bundleIdentifier, Self.skippedApps.contains(bundleID) { return }
         let ownApp = source?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-        let sourceName = ownApp ? "素顏 Shot" : source?.localizedName
+        let sourceName = ownApp ? "拾光" : source?.localizedName
         let sourceID = ownApp ? Bundle.main.bundleIdentifier : source?.bundleIdentifier
 
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {

@@ -45,6 +45,8 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
     private let staticRowThreshold = 1.5
     private let matchThreshold = 3.0
     private let candidateCount = 6
+    /// Bottom rows of every frame kept out of the seams (only the last frame contributes them, once).
+    private let edgeMargin = 4
 
     init(maxHeight: Int = 40_000, previewWidth: Int = 200) {
         self.maxHeight = maxHeight
@@ -121,7 +123,8 @@ final class ScrollStitcher: @unchecked Sendable { // used serially by one captur
     private func compose(scale: CGFloat, thumbnails: Bool) -> CGImage? {
         guard let first, let last else { return nil }
         let h = first.image.height
-        let footer = footer ?? 0
+        // Captured frames often have a blended, lighter bottom edge; never let it sit at a seam.
+        let footer = max(footer ?? 0, edgeMargin)
         var pieces: [(image: CGImage?, rows: Range<Int>)] = [(thumbnails ? first.thumbnail : first.image, 0..<(h - footer))]
         for strip in strips { pieces.append((thumbnails ? strip.thumbnail : strip.image, max(0, h - footer - strip.rows)..<(h - footer))) }
         pieces.append((thumbnails ? last.thumbnail : last.image, (h - footer)..<h))
