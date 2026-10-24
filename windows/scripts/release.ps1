@@ -4,7 +4,8 @@
 #   powershell -ExecutionPolicy Bypass -File windows/scripts/release.ps1             # notes = commit subjects since the previous tag
 #   powershell -ExecutionPolicy Bypass -File windows/scripts/release.ps1 -Notes notes.md
 #   powershell -ExecutionPolicy Bypass -File windows/scripts/release.ps1 -DryRun     # build only, publish nothing
-param([string]$Notes, [switch]$DryRun)
+#   ... -Yes skips the confirmation question (when it was already given, e.g. to an assistant running the script)
+param([string]$Notes, [switch]$DryRun, [switch]$Yes)
 $ErrorActionPreference = 'Stop'
 $repo = 'xiah6415/shotscreen'
 
@@ -31,8 +32,10 @@ try {
     $releaseExists = $LASTEXITCODE -eq 0
     if ($releaseExists -and ($existing -contains (Split-Path $exe -Leaf))) { throw "$tag already has the Windows build; bump VERSION" }
 
-    $answer = Read-Host ($(if ($releaseExists) { "Add the Windows build to the existing $tag on github.com/$repo? [y/N]" } else { "Create $tag on github.com/$repo with the Windows build? [y/N]" }))
-    if ($answer -notmatch '^[yY]') { Write-Output "Cancelled"; exit 1 }
+    if (-not $Yes) {
+        $answer = Read-Host ($(if ($releaseExists) { "Add the Windows build to the existing $tag on github.com/$repo? [y/N]" } else { "Create $tag on github.com/$repo with the Windows build? [y/N]" }))
+        if ($answer -notmatch '^[yY]') { Write-Output "Cancelled"; exit 1 }
+    }
 
     if ($releaseExists) {
         gh release upload $tag @files --repo $repo
