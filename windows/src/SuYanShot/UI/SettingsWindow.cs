@@ -1,5 +1,6 @@
 using SuYanShot.App;
 using SuYanShot.ClipboardHistory;
+using SuYanShot.Update;
 using SuYanShot.Shortcuts;
 
 namespace SuYanShot.UI;
@@ -30,7 +31,7 @@ internal sealed class SettingsWindow : Form
 
     /// <param name="applyShortcuts">Registers the given shortcuts globally and returns the actions Windows refused.</param>
     public SettingsWindow(ShortcutStore store, Func<IReadOnlyDictionary<ShortcutAction, KeyShortcut>, IReadOnlySet<ShortcutAction>> applyShortcuts,
-                          ClipboardFeature clipboard)
+                          ClipboardFeature clipboard, UpdateController updates)
     {
         this.store = store;
         this.clipboard = clipboard;
@@ -111,6 +112,13 @@ internal sealed class SettingsWindow : Form
         startAtLogin.CheckedChanged += (_, _) => StartupRegistration.IsEnabled = startAtLogin.Checked;
         AddSpanning(layout, startAtLogin, row++);
         AddSpanning(layout, Note("截圖存檔在桌面，檔名和 Mac 版相同。"), row++);
+        var autoUpdate = new CheckBox { Text = "自動檢查更新", AutoSize = true, Checked = updates.AutomaticallyChecks, Margin = new Padding(0, 8, 0, 4) };
+        autoUpdate.CheckedChanged += (_, _) => updates.AutomaticallyChecks = autoUpdate.Checked;
+        AddSpanning(layout, autoUpdate, row++);
+        var checkNow = new Button { Text = "立即檢查更新", AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+        checkNow.Click += (_, _) => updates.CheckNow();
+        AddSpanning(layout, checkNow, row++);
+        AddSpanning(layout, Note($"目前版本 {AppVersion.Current}。新版發佈在 GitHub，會先確認是同一張憑證簽的才安裝。"), row++);
 
         var close = new Button { Text = "關閉", AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 12, 0, 0) };
         close.Click += (_, _) => Close();

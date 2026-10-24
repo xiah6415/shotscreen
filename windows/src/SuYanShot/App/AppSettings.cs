@@ -23,6 +23,16 @@ internal sealed class AppSettings
 
     public List<NetworkIdentity> PhoneShareHomeNetworks { get; set; } = new();
 
+    public bool UpdateAutomaticallyChecks { get; set; } = true;
+
+    /// The version the user chose 略過這個版本 for; automatic checks stay quiet about it.
+    public string? UpdateSkippedVersion { get; set; }
+
+    public DateTimeOffset? UpdateLastCheck { get; set; }
+
+    /// Developer override for testing updates against a local feed instead of GitHub.
+    public string? UpdateFeedUrl { get; set; }
+
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     public static string DefaultPath =>

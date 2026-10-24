@@ -13,6 +13,9 @@ internal sealed class CaptureCoordinator
     private ScrollCaptureSession? scrolling;
     private ScrollCaptureHud? scrollHud;
 
+    /// A selection overlay or a scroll capture is in progress (updates wait for it).
+    public bool IsCapturing => busy || scrolling != null;
+
     public CaptureCoordinator(ImageExporter exporter)
     {
         this.exporter = exporter;

@@ -14,6 +14,42 @@ id, so history and settings carry over: `%APPDATA%\SuYanShot` (settings, shortcu
 - Windows 10 2004 (build 19041) or later; Windows 11 recommended
 - .NET 8 SDK to build (`winget install Microsoft.DotNet.SDK.8`)
 
+## Install (for users)
+
+1. From [Releases](https://github.com/xiah6415/shotscreen/releases/latest) download `Glean-<version>-win-x64.exe` (one
+   self-contained file; no .NET install needed).
+2. Open it. Windows SmartScreen may say it is from an unknown publisher (the app is signed with the project's own
+   certificate, not a paid one): choose **More info → Run anyway**.
+3. Answer **是** to 「要把拾光安裝到這台電腦嗎？」: it copies itself to `%LOCALAPPDATA%\Programs\Glean\Glean.exe` and adds 拾光 to
+   the Start menu. No administrator rights. Opening a newer download the same way replaces the installed copy.
+4. 拾光 lives in the notification area. 設定… → 登入 Windows 時自動啟動 starts it with Windows.
+
+To uninstall: quit 拾光, delete `%LOCALAPPDATA%\Programs\Glean` and the Start menu shortcut; settings and history are in
+`%APPDATA%\SuYanShot` and `%LOCALAPPDATA%\SuYanShot`.
+
+### Updates
+
+Same flow as macOS: shortly after launch and then daily (設定 → 自動檢查更新), and from 檢查更新… in the tray menu, the app reads
+the latest GitHub Release. If it carries a newer Windows build it offers 更新 / 稍後 / 略過這個版本. 更新 downloads the exe next
+to the installed one and installs it only if all of these hold: its SHA-256 matches the published `.sha256`, its product
+name and version match the release, its Authenticode signature is intact, and it is signed with **the same certificate as
+the running app**. Then the running exe is renamed to `Glean.exe.old`, the new one takes its place and starts, waits for the
+old process to quit and deletes `.old`. Anything else falls back to opening the release page. A development build
+(`bin\Debug`) never checks or installs updates. `settings.json` → `updateFeedUrl` points the check at a test feed.
+
+The Windows build is attached to the same release as the macOS zip, as `Glean-<version>-win-x64.exe` plus
+`Glean-<version>-win-x64.exe.sha256`. It is deliberately not a .zip: the macOS updater takes the first .zip asset.
+
+## Releasing (for the maintainer)
+
+1. Once per PC: `powershell -ExecutionPolicy Bypass -File windows/scripts/make-signing-cert.ps1` creates the
+   `Glean Local Signing` code-signing certificate in the user's certificate store. **Back it up** with its private key
+   (certmgr.msc → Personal → Certificates → Export, .pfx): installed copies only accept updates signed with it.
+2. Bump `VERSION` (shared with macOS), commit and push.
+3. `powershell -ExecutionPolicy Bypass -File windows/scripts/release.ps1` builds the signed exe
+   (`windows/scripts/publish.ps1`, output in `windows/dist`), then, after asking, adds it to the existing GitHub Release
+   `v<VERSION>` or creates that release. `-DryRun` builds only; `-Notes notes.md` sets the notes of a new release.
+
 ## Build, test, run
 
 From this `windows/` folder:
@@ -164,6 +200,9 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - `UI/AppIcon.cs` — the shared icon for the tray, windows and the phone's Home Screen.
 - `UI/` — preview card, countdown HUD, settings window and its shortcut recorder, clipboard panel, phone share window,
   and `QrCode.cs` (a small QR encoder, byte mode / level M, so no package is needed).
+- `Update/` — `UpdateChecker` (GitHub Releases feed, version compare), `UpdateInstaller` (download, checksum, signature
+  checks via `WinVerifyTrust` and the signer thumbprint, swap), `UpdateController` (schedule and prompts),
+  `AppInstallation` (first-run install, Start menu shortcut, post-update clean-up).
 - `Native/NativeMethods.cs` — all Win32 interop.
 
 ### Decisions
@@ -185,7 +224,7 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 71 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 80 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; phone sharing over loopback (status for off / no password / other network /
@@ -193,10 +232,15 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
   attributes, hashed-only storage, every route signed in, forged cookie, logout, five-failure lockout, password change signing
   everyone out); mDNS name sanitising, query/answer round trip and compressed names; All-in-One resizing; annotation state and
   renderer; the macOS synthetic stitcher test ported (8 seeds × normal / edge mode: every frame with content in the overlap gets
-  the exact offset, sticky bars appear once, content rows match the ground truth row for row; ~20 ms per 1000×800 frame).
+  the exact offset, sticky bars appear once, content rows match the ground truth row for row; ~20 ms per 1000×800 frame);
+  update version comparison and release parsing (Windows assets picked, the macOS zip never, macOS-only releases ignored).
 - Checked by hand on this PC (2026-10-24): Windows' own resolver (`Resolve-DnsName`) found the name published by the responder
   at this PC's address, and with a simulated device already owning the name the responder backed off to `-2`.
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
+- Updates, checked end to end on this PC against a local feed (2026-10-24) with a signed 0.3.1 "installed" copy and a
+  0.3.2 build: the right asset was chosen, downloaded, verified and swapped in, and the new version started, waited for the
+  old process and deleted `.old`; a tampered exe (with a matching checksum), an exe signed by another certificate, a wrong
+  checksum and a wrong version were all refused, leaving 0.3.1 in place.
 - Scroll capture, checked by hand on this PC (2026-10-24): auto scroll on a 6,400 px test window stitched 6,396 px (the
   region is a few pixels shorter than the window) through three checkpoints and stopped at the end, three runs in a row; the
   seams were checked by eye. One earlier run stopped after two frames, probably because the test window was not yet in front.
@@ -207,4 +251,4 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 ## Not yet ported
 
 Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), the window picker's
-thumbnail grid, update checking, and the first-run 初次設定 window.
+thumbnail grid, and the first-run 初次設定 window.

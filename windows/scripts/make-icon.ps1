@@ -1,4 +1,4 @@
-# Builds windows/src/SuYanShot/Resources/Glean.ico from the shared macOS icon (Resources/AppIcon.png).
+﻿# Builds windows/src/SuYanShot/Resources/Glean.ico from the shared macOS icon (Resources/AppIcon.png).
 # Each size is stored as a PNG frame, which Windows Vista and later read. Re-run after the icon changes:
 #   powershell -ExecutionPolicy Bypass -File windows/scripts/make-icon.ps1
 Add-Type -AssemblyName System.Drawing

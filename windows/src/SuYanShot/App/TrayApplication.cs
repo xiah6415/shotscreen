@@ -4,6 +4,7 @@ using SuYanShot.ClipboardHistory;
 using SuYanShot.Shortcuts;
 using SuYanShot.Storage;
 using SuYanShot.UI;
+using SuYanShot.Update;
 
 namespace SuYanShot.App;
 
@@ -17,6 +18,7 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly NotifyIcon trayIcon;
     private readonly Dictionary<ShortcutAction, ToolStripMenuItem> actionItems = new();
     private readonly ClipboardFeature clipboard;
+    private readonly UpdateController updates;
     private readonly ToolStripMenuItem phoneSwitch;
     private SettingsWindow? settingsWindow;
     private bool trayShowsSharing;
@@ -53,11 +55,14 @@ internal sealed class TrayApplication : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
         menu.Items.Add(Item("設定…", OpenSettings));
+        menu.Items.Add(Item("檢查更新…", () => updates!.CheckNow()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("結束拾光", ExitThread));
 
         // Created after the menu, so a WinForms synchronization context exists for the clipboard and phone server.
-        clipboard = new ClipboardFeature(AppSettings.Load());
+        var settings = AppSettings.Load();
+        clipboard = new ClipboardFeature(settings);
+        updates = new UpdateController(settings) { CanInstallNow = () => !coordinator.IsCapturing, Exit = ExitThread };
 
         trayIcon = new NotifyIcon
         {
@@ -77,6 +82,7 @@ internal sealed class TrayApplication : ApplicationContext
         clipboard.PhoneShare.Changed += UpdatePhoneShare;
         UpdatePhoneShare();
         StartupRegistration.RefreshPath();
+        updates.Start();
 
         var failed = ApplyShortcuts(shortcutStore.Load());
         if (failed.Count > 0)
@@ -122,7 +128,7 @@ internal sealed class TrayApplication : ApplicationContext
             settingsWindow.Activate();
             return;
         }
-        settingsWindow = new SettingsWindow(shortcutStore, ApplyShortcuts, clipboard);
+        settingsWindow = new SettingsWindow(shortcutStore, ApplyShortcuts, clipboard, updates);
         settingsWindow.FormClosed += (_, _) => settingsWindow = null;
         settingsWindow.Show();
         settingsWindow.Activate();
@@ -154,6 +160,7 @@ internal sealed class TrayApplication : ApplicationContext
     {
         settingsWindow?.Close();
         clipboard.Dispose();
+        updates.Dispose();
         hotkeys.Dispose();
         trayIcon.Visible = false;
         trayIcon.Dispose();
