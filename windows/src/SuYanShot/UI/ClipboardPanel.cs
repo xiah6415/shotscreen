@@ -34,7 +34,8 @@ internal sealed class ClipboardPanel : Form
 
     private readonly record struct Chip(Filter? Filter, string Title, Color? Color, RectangleF Bounds);
 
-    private static readonly Color Background = Color.FromArgb(246, 30, 30, 32);
+    // Opaque: a form's BackColor can't be translucent (WinForms throws "控制項不支援透明的背景色彩").
+    private static readonly Color Background = Color.FromArgb(30, 30, 32);
     private static readonly Color CardColor = Color.FromArgb(44, 44, 47);
     private static readonly Color Accent = Color.FromArgb(10, 132, 255);
     private static readonly Color Muted = Color.FromArgb(152, 152, 159);
