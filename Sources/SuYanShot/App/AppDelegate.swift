@@ -129,7 +129,7 @@ final class CaptureCoordinator {
         Task { @MainActor in
             do {
                 let display = try await display(for: selection.screen)
-                let image = try await captureService.capture(display: display, sourceRect: selection.sourceRectPixels)
+                let image = try await captureService.capture(display: display, sourceRect: selection.sourceRectPoints)
                 finish(CapturedImage(image: image, mode: .region, capturedAt: .now))
             } catch { present(error) }
         }
@@ -191,7 +191,8 @@ final class CaptureCoordinator {
                 let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
                 let configuration = ScrollCaptureConfiguration(
                     display: display,
-                    sourceRect: selection.sourceRectPixels,
+                    sourceRect: selection.sourceRectPoints,
+                    regionPixelHeight: Int(selection.outputPixelSize.height),
                     scrollPoint: CGPoint(x: globalRegion.midX, y: primaryHeight - globalRegion.midY),
                     regionHeightPoints: globalRegion.height)
                 scrollService.start(configuration: configuration) { [weak self] progress in
@@ -347,8 +348,8 @@ final class CaptureCoordinator {
             case let .region(selection):
                 let display = try await display(for: selection.screen)
                 filter = try await captureService.displayFilter(for: display)
-                sourceRect = selection.sourceRectPixels
-                pixelSize = selection.sourceRectPixels.size
+                sourceRect = selection.sourceRectPoints
+                pixelSize = selection.outputPixelSize
                 hudScreen = selection.screen
                 hudRegion = selection.rectInScreenPoints.offsetBy(dx: selection.screen.frame.minX, dy: selection.screen.frame.minY)
             case let .screen(screen):

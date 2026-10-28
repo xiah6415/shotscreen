@@ -14,11 +14,12 @@ final class ScreenCaptureService {
         let filter = try await displayFilter(for: display)
         let configuration = SCStreamConfiguration()
         configuration.showsCursor = false
-        if let sourceRect {
-            configuration.sourceRect = sourceRect.integral
-            configuration.width = max(1, Int(sourceRect.width))
-            configuration.height = max(1, Int(sourceRect.height))
-        }
+        // sourceRect is in logical points; output dimensions are in pixels.
+        let rect = sourceRect ?? CGRect(origin: .zero, size: filter.contentRect.size)
+        let pixelSize = CaptureGeometry.pixelSize(for: rect, scale: CGFloat(filter.pointPixelScale))
+        if let sourceRect { configuration.sourceRect = sourceRect }
+        configuration.width = max(1, Int(pixelSize.width))
+        configuration.height = max(1, Int(pixelSize.height))
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
     }
 

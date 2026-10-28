@@ -12,7 +12,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 ## Decisions
 - Use only Apple frameworks; no third-party dependencies.
 - Target macOS 14+, Apple Silicon and Intel through SwiftPM's native universal build support.
-- Use ScreenCaptureKit for capture. Region selection is an AppKit overlay and selected rectangles are converted into per-display pixel coordinates before capture.
+- Use ScreenCaptureKit for capture. Region selection is an AppKit overlay and selected rectangles are converted into display-local top-left logical points for capture; output dimensions are scaled separately to backing pixels.
 - Scroll capture is deliberately an interface-only technical-spike boundary in this phase.
 
 ## Completed
@@ -88,3 +88,14 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 
 ## Next Agent Instructions
 Read `AGENTS.md`, this file, and `HANDOFF TO CLAUDE CODE.md` before modifying capture code. Scroll capture and the annotation editor exist now; recording, OCR, and cloud remain out of scope unless the user asks.
+
+## 2026-10-28 Retina capture coordinate fix
+- Fixed the region offset on Retina displays: SCStreamConfiguration.sourceRect takes display-local logical points (confirmed in the Apple SDK SCStream.h), while width/height take output pixels. Previously the crop origin and extent were multiplied by backingScaleFactor.
+- Region, All-in-One, scroll capture and region recording now pass sourceRectPoints; outputPixelSize stays separate. Scroll checkpoint distances still use pixel heights. Full-display screenshots explicitly request filter.contentRect size × pointPixelScale instead of default output dimensions.
+- Added CaptureGeometry and the XCTest-free regression harness scripts/capture-geometry-test/main.swift. Run: swiftc Sources/SuYanShot/Models/CaptureGeometry.swift scripts/capture-geometry-test/main.swift -o /tmp/glean-capture-geometry-test && /tmp/glean-capture-geometry-test.
+- Validation: geometry checks pass for 1×/2×, full-display and fractional edge selections; swift build --disable-sandbox passes; git diff --check passes. Ordinary swift build hits the execution environment's nested sandbox restriction.
+- Not installed or launched; actual MacBook display alignment, mixed-scale monitors, scrolling and recording still need interactive validation. No Git push.
+
+- Installation follow-up (2026-10-28): scripts/make-app.sh --install succeeded for arm64 + x86_64 with SuYanShot Local Signing; installed /Applications/Glean.app and relaunched. Installed binary matches the packaged fix. Screen alignment still awaits user verification.
+
+- Version follow-up (2026-10-28): bumped VERSION to 0.3.2, rebuilt and installed /Applications/Glean.app; verified installed CFBundleShortVersionString is 0.3.2. No commit, push or GitHub Release.

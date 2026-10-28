@@ -44,7 +44,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         let height = max(2, Int(pixelSize.height) / 2 * 2)
 
         let configuration = SCStreamConfiguration()
-        if let sourceRect { configuration.sourceRect = sourceRect.integral }
+        if let sourceRect { configuration.sourceRect = sourceRect }
         configuration.width = width
         configuration.height = height
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.frameRate))
