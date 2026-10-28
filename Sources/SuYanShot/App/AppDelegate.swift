@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         shortcuts.onAction = { [weak self] action in
             switch action {
+            case .recognizeText: self?.coordinator.recognizeText()
             case .region: self?.coordinator.captureRegion()
             case .window: self?.coordinator.captureWindow()
             case .fullScreen: self?.coordinator.captureFullScreen()
@@ -73,6 +74,9 @@ final class CaptureCoordinator {
     private lazy var fullScreenService = FullScreenCaptureService(captureService: captureService)
     private lazy var windowService = WindowCaptureService(captureService: captureService)
     private let regionSelector = RegionSelector()
+    private let textRecognizer = TextRecognitionService()
+    private let textRecognitionHUD = TextRecognitionHUD()
+    private var isRecognizingText = false
     private let allInOneSelector = AllInOneSelector()
     private let windowPicker = WindowPicker()
     private let countdown = CountdownHUD()
@@ -99,6 +103,46 @@ final class CaptureCoordinator {
         }
     }
 
+    func recognizeText() {
+        guard !isRecognizingText, ensurePermission() else { return }
+        isRecognizingText = true
+        textRecognitionHUD.hide()
+        regionSelector.begin { [weak self] result in
+            guard let self else { return }
+            self.isRecognizingText = false
+            guard case let .success(selection) = result else { return }
+            self.recognizeText(in: selection)
+        }
+    }
+
+    /// Both the dedicated OCR shortcut and All-in-One use the same recognition and feedback path.
+    private func recognizeText(in selection: RegionSelection) {
+        guard !isRecognizingText else { return }
+        isRecognizingText = true
+        Task { @MainActor in
+            defer { self.isRecognizingText = false }
+            self.textRecognitionHUD.show("OCR 辨識中…", working: true, on: selection.screen)
+            do {
+                let display = try await self.display(for: selection.screen)
+                let image = try await self.captureService.capture(display: display, sourceRect: selection.sourceRectPoints)
+                let text = try await self.textRecognizer.recognize(image)
+                guard !text.isEmpty else {
+                    self.textRecognitionHUD.show("沒有找到文字，請重新框選", on: selection.screen)
+                    return
+                }
+                guard ClipboardManager.copy(text: text) else {
+                    self.textRecognitionHUD.show("無法複製文字，請再試一次", on: selection.screen)
+                    return
+                }
+                CompletionSound.ocr()
+                self.textRecognitionHUD.show("OCR 文字已複製，可以直接貼上", on: selection.screen)
+            } catch {
+                self.textRecognitionHUD.hide()
+                self.present(error)
+            }
+        }
+    }
+
     /// Region, scroll, window and full-screen capture — and recording — from one overlay.
     func captureAllInOne(mode: AllInOneMode = .capture) {
         if isScrollCapturing { finishScrolling(); return }
@@ -107,6 +151,7 @@ final class CaptureCoordinator {
         allInOneSelector.begin(mode: mode, recording: recordingSettings) { [weak self] action in
             guard let self, let action else { return }
             switch action {
+            case let .recognizeText(selection): self.recognizeText(in: selection)
             case let .capture(selection): self.capture(selection)
             case let .scroll(selection): self.startScrolling(selection)
             case .window: self.captureWindow()
@@ -445,6 +490,7 @@ final class CaptureCoordinator {
 
     private func finish(_ captured: CapturedImage) {
         ClipboardManager.copy(captured.image)
+        CompletionSound.screenshot()
         thumbnail.show(captured)
     }
 

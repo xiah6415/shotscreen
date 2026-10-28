@@ -1,10 +1,11 @@
 import Carbon.HIToolbox
 
 enum ShortcutAction: Int, CaseIterable {
-    case region = 1, window, fullScreen, delayed, scroll, allInOne, clipboard, record
+    case region = 1, window, fullScreen, delayed, scroll, allInOne, clipboard, record, recognizeText
 
     var title: String {
         switch self {
+        case .recognizeText: "OCR"
         case .region: "框選截圖"
         case .window: "視窗截圖"
         case .fullScreen: "全螢幕截圖"

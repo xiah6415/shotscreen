@@ -99,3 +99,20 @@ Read `AGENTS.md`, this file, and `HANDOFF TO CLAUDE CODE.md` before modifying ca
 - Installation follow-up (2026-10-28): scripts/make-app.sh --install succeeded for arm64 + x86_64 with SuYanShot Local Signing; installed /Applications/Glean.app and relaunched. Installed binary matches the packaged fix. Screen alignment still awaits user verification.
 
 - Version follow-up (2026-10-28): bumped VERSION to 0.3.2, rebuilt and installed /Applications/Glean.app; verified installed CFBundleShortVersionString is 0.3.2. No commit, push or GitHub Release.
+
+## 2026-10-28 Region OCR (0.4.0)
+- User requested only region-to-clipboard OCR, not a screenshot-preview button or an editor. Menu 框選辨識文字 and default ⌘⇧7; customizable via the existing shortcut settings. Appended ShortcutAction.recognizeText so persisted numeric IDs remain stable and existing saved shortcuts get the new default through knownActions migration.
+- OCR/TextRecognitionService.swift is a separate actor using Vision VNRecognizeTextRequest (.accurate, zh-Hant + en-US, language correction). Recognition runs off MainActor and preserves Vision's line breaks; no network, image file, or API dependency.
+- Coordinator uses the existing Retina-correct region capture/permission path. Nonactivating TextRecognitionHUD shows progress, success, or no text. Only a nonempty successful result writes plain text to the clipboard; cancellation, capture/recognition failure and blank results leave it alone. Existing clipboard history can record recognized text when enabled.
+- swift build --disable-sandbox passes. scripts/ocr-test/OCRSmoke.swift generates an image and verifies English, Traditional Chinese, line breaks and blank-image results; passed outside the execution sandbox (Vision fails with generic nilError inside it). Compile/run: swiftc -parse-as-library Sources/SuYanShot/OCR/TextRecognitionService.swift scripts/ocr-test/OCRSmoke.swift -o /tmp/glean-ocr-test && /tmp/glean-ocr-test.
+- No actual screen contents or clipboard were read/written by the OCR test. Interactive region selection/hotkey/paste remain for user verification. VERSION bumped to 0.4.0 for this added feature; not published.
+
+- Built arm64 + x86_64 with the existing SuYanShot Local Signing identity; installed and relaunched /Applications/Glean.app. Verified installed 0.4.0 and executable hash matches packaged app. No commit/push/Release for OCR yet.
+
+## 2026-10-28 OCR naming, All-in-One and completion sounds
+- User requested the visible name OCR, an All-in-One option, and different OCR/screenshot sounds. Renamed menu/shortcut title/documentation to OCR; kept action IDs and ⌘⇧7 unchanged.
+- All-in-One capture toolbar now has OCR (disabled without a region); O runs it after selection. Toolbar width is 590 pt to fit the added button. The selected region goes through the same recognizeText(in:) helper as the dedicated shortcut, without asking for a second selection.
+- UI/CompletionSound.swift retains two native NSSounds: screenshot Pop and OCR Tink. Screenshot sound is called from the shared finish path (region/window/display/scroll), OCR sound only after nonempty recognized text is successfully copied. No success sound for cancellation, blank OCR or failure.
+- Validation: swift build --disable-sandbox and git diff --check pass; both named system sounds load successfully. Actual All-in-One interaction and audible distinction await user verification. Continues the unreleased 0.4.0 build.
+
+- Follow-up installed and relaunched /Applications/Glean.app using the existing signing certificate; verified installed binary matches this build. No GitHub publication.

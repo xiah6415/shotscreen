@@ -41,6 +41,8 @@ final class MenuBarController: NSObject {
         actionItems[.fullScreen] = item("全螢幕截圖", symbol: "display", action: #selector(fullScreenCapture))
         actionItems[.scroll] = item("捲動截圖", symbol: "scroll", action: #selector(scrollCapture))
         [ShortcutAction.region, .window, .fullScreen, .scroll].forEach { menu.addItem(actionItems[$0]!) }
+        actionItems[.recognizeText] = item("OCR", symbol: "text.viewfinder", action: #selector(recognizeText))
+        menu.addItem(actionItems[.recognizeText]!)
         let delayed = item("延遲截圖", symbol: "timer", action: nil)
         let delayedMenu = NSMenu(title: "延遲截圖")
         for option in DelayOption.allCases {
@@ -119,6 +121,7 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func allInOneCapture() { coordinator.captureAllInOne() }
+    @objc private func recognizeText() { coordinator.recognizeText() }
     @objc private func regionCapture() { coordinator.captureRegion() }
     @objc private func windowCapture() { coordinator.captureWindow() }
     @objc private func fullScreenCapture() { coordinator.captureFullScreen() }

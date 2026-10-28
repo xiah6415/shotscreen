@@ -2,7 +2,7 @@
 
 Formerly 素顏 Shot.
 
-macOS 選單列小工具：截圖、捲動截圖、錄影、標註和剪貼簿紀錄。不用訂閱、不用帳號、不上雲端，也不依賴任何第三方套件。
+macOS 選單列小工具：截圖、捲動截圖、OCR、錄影、標註和剪貼簿紀錄。不用訂閱、不用帳號、不上雲端，也不依賴任何第三方套件。
 
 A native macOS menu-bar tool for screenshots, scrolling captures, screen recording, annotation and clipboard history — no subscription, account, cloud or third-party frameworks.
 
@@ -28,16 +28,19 @@ A native macOS menu-bar tool for screenshots, scrolling captures, screen recordi
 
 | 功能 | 預設快捷鍵 |
 |---|---|
-| All-in-One（框選後選截圖、捲動截圖、錄影；Tab 切換截圖／錄影） | ⌘⇧5 |
+| All-in-One（框選後選截圖、OCR、捲動截圖、錄影；Tab 切換截圖／錄影） | ⌘⇧5 |
 | 框選截圖 | ⌘⇧1 |
 | 視窗截圖（游標點選，或按空白鍵用縮圖一次看所有視窗） | ⌘⇧2 |
 | 全螢幕截圖 | ⌘⇧3 |
 | 延遲截圖（3 秒） | ⌘⇧4 |
 | 捲動截圖（可自動捲動，每段會停下來問要不要繼續） | ⌘⇧6 |
+| OCR（離線辨識繁體中文、英文，直接複製） | ⌘⇧7 |
 | 錄影（範圍、視窗或全螢幕；可只錄某個 App 的聲音） | ⌘⇧R |
 | 剪貼簿紀錄（搜尋、標籤、直接貼上） | ⌘⇧V |
 
 快捷鍵都能在 **設定…（⌘,）** 裡改，也有「改用 ⌃⇧ 組合」一鍵避開衝突。⌘⇧V、⌘⇧R 在部分 App 另有用途（貼上並符合樣式、重新整理），不習慣的話建議改用 ⌃⇧。
+
+All-in-One 的截圖模式框選後可點 **OCR**（或按 **O**），辨識完成直接複製文字。截圖與 OCR 成功時會播放不同提示音。
 
 其他：截圖後的標註編輯器（箭頭、框、文字、數字、馬賽克、模糊、裁切）、錄影轉 GIF、**手機分享**（同一個 Wi-Fi 下用手機打開 `http://glean.local:8765`，用密碼登入後可以看剪貼簿紀錄、把文字或照片傳回 Mac；只在你允許的網路開放）。
 

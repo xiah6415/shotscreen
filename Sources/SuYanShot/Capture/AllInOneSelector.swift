@@ -6,6 +6,7 @@ import SwiftUI
 enum AllInOneAction {
     case capture(RegionSelection)
     case scroll(RegionSelection)
+    case recognizeText(RegionSelection)
     case record(RegionSelection)
     case window
     case fullScreen(NSScreen)
@@ -93,6 +94,7 @@ private final class AllInOneView: NSView {
             recording: recording,
             onCapture: { [weak self] in self?.perform(.capture) },
             onScroll: { [weak self] in self?.perform(.scroll) },
+            onOCR: { [weak self] in self?.perform(.recognizeText) },
             onRecord: { [weak self] in self?.perform(.record) },
             onWindow: { [weak self] in self?.selector?.finish(.window) },
             onFullScreen: { [weak self] in self.map { $0.selector?.finish(.fullScreen($0.screen)) } },
@@ -126,7 +128,7 @@ private final class AllInOneView: NSView {
         drag = nil
     }
 
-    private enum Action { case capture, scroll, record }
+    private enum Action { case capture, scroll, record, recognizeText }
 
     private func perform(_ action: Action) {
         guard let selection, selection.width >= 2, selection.height >= 2 else { return }
@@ -134,6 +136,7 @@ private final class AllInOneView: NSView {
         switch action {
         case .capture: selector?.finish(.capture(region))
         case .scroll: selector?.finish(.scroll(region))
+        case .recognizeText: selector?.finish(.recognizeText(region))
         case .record: selector?.finish(.record(region))
         }
     }
@@ -318,6 +321,7 @@ private final class AllInOneView: NSView {
         case kVK_Tab: model.mode = model.mode == .capture ? .record : .capture
         case kVK_Return, kVK_ANSI_KeypadEnter: perform(model.mode == .capture ? .capture : .record)
         case kVK_ANSI_S where model.mode == .capture: perform(.scroll)
+        case kVK_ANSI_O where model.mode == .capture: perform(.recognizeText)
         case kVK_ANSI_R:
             // From 截圖 mode, R first shows the recording options instead of starting straight away.
             if model.mode == .capture { model.mode = .record } else { perform(.record) }
@@ -331,6 +335,7 @@ private struct AllInOneToolbar: View {
     @ObservedObject var recording: RecordingSettings
     let onCapture: () -> Void
     let onScroll: () -> Void
+    let onOCR: () -> Void
     let onRecord: () -> Void
     let onWindow: () -> Void
     let onFullScreen: () -> Void
@@ -338,7 +343,7 @@ private struct AllInOneToolbar: View {
     let onRecordFullScreen: () -> Void
     let onCancel: () -> Void
 
-    static func width(for mode: AllInOneMode) -> CGFloat { mode == .capture ? 520 : 800 }
+    static func width(for mode: AllInOneMode) -> CGFloat { mode == .capture ? 590 : 800 }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -356,6 +361,8 @@ private struct AllInOneToolbar: View {
                 ToolbarAction(title: "截圖", symbol: "camera.viewfinder", help: "截取選取範圍（Return）", action: onCapture)
                     .disabled(!model.hasSelection)
                 ToolbarAction(title: "捲動截圖", symbol: "scroll", help: "開始捲動截圖（S）", action: onScroll)
+                    .disabled(!model.hasSelection)
+                ToolbarAction(title: "OCR", symbol: "text.viewfinder", help: "辨識選取範圍的文字並複製（O）", action: onOCR)
                     .disabled(!model.hasSelection)
                 Divider().frame(height: 30).padding(.horizontal, 4)
                 ToolbarAction(title: "視窗", symbol: "macwindow", help: "改選一個視窗", action: onWindow)
