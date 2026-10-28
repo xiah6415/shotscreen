@@ -49,8 +49,14 @@ enum PhoneSharePage {
   .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
   footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
            background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid var(--line); }
+  #attachments { display: flex; gap: 10px; overflow-x: auto; max-height: 110px; margin-bottom: 8px; }
+  #attachments:empty { display: none; }
+  .attachment { position: relative; flex: none; width: 96px; height: 96px; border-radius: 10px; background: var(--chip); }
+  .attachment img { width: 100%; height: 100%; object-fit: contain; border-radius: 10px; }
+  .attachment button { position: absolute; right: 2px; top: 2px; width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--toast); color: #fff; font-size: 18px; }
+  button:disabled { opacity: .5; }
   #composer { display: flex; gap: 8px; align-items: flex-end; }
-  #draft { flex: 1; font: 16px -apple-system, sans-serif; border-radius: 10px; border: 0; padding: 9px 12px; background: var(--card); color: var(--text); resize: none; max-height: 120px; outline: none; }
+  #draft { flex: 1; min-width: 0; font: 16px -apple-system, sans-serif; border-radius: 10px; border: 0; padding: 9px 12px; background: var(--card); color: var(--text); resize: none; max-height: 120px; outline: none; }
   .round { border: 0; border-radius: 10px; padding: 10px 12px; font-size: 15px; font-weight: 600; }
   #sendText { background: var(--accent); color: #fff; }
   #pickImage { background: var(--chip); color: var(--accent); }
@@ -71,12 +77,13 @@ enum PhoneSharePage {
 </header>
 <main id="list"></main>
 <footer>
+  <div id="attachments" aria-label="待傳送圖片"></div>
   <div id="composer">
-    <textarea id="draft" rows="1" placeholder="傳文字到 Mac"></textarea>
+    <textarea id="draft" rows="1" placeholder="輸入文字或貼上圖片"></textarea>
     <button id="pickImage" class="round" aria-label="傳照片">照片</button>
     <button id="sendText" class="round">傳送</button>
   </div>
-  <input id="file" type="file" accept="image/*" hidden>
+  <input id="file" type="file" accept="image/*" multiple hidden>
 </footer>
 <div id="toast"></div>
 <div id="viewer"><img alt=""><p>長按圖片可以儲存或複製・點一下關閉</p></div>
@@ -163,7 +170,7 @@ function render() {
   const list = $('list');
   const items = state.items.filter(matches);
   if (!items.length) {
-    list.replaceChildren(el('div', 'empty', state.items.length ? '沒有符合的項目' : '還沒有紀錄。在 Mac 上複製東西，或從下面傳文字過去。'));
+    list.replaceChildren(el('div', 'empty', state.items.length ? '沒有符合的項目' : '還沒有紀錄。在 Mac 上複製東西，或從下面傳文字、圖片過去。'));
     return;
   }
   list.replaceChildren(...items.map(card));
@@ -254,22 +261,122 @@ $('viewer').querySelector('img').onclick = () => $('viewer').classList.remove('s
 $('search').oninput = (e) => { state.query = e.target.value; render(); };
 
 const draft = $('draft');
-draft.oninput = () => { draft.style.height = 'auto'; draft.style.height = Math.min(draft.scrollHeight, 120) + 'px'; };
-$('sendText').onclick = async () => {
-  const text = draft.value;
-  if (!text.trim()) { toast('先輸入一些文字'); return; }
-  const r = await api('/api/send', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text });
-  if (r.ok) { draft.value = ''; draft.oninput(); toast('已傳到 Mac'); state.version = ''; load(); } else { toast('傳送失敗'); }
-};
+const pendingImages = [];
+const maxImageBytes = 20 * 1024 * 1024;
+let sending = false;
+
+function fitComposer() {
+  draft.style.height = 'auto';
+  draft.style.height = Math.min(draft.scrollHeight, 120) + 'px';
+  $('list').style.paddingBottom = (document.querySelector('footer').getBoundingClientRect().height + 16) + 'px';
+}
+draft.oninput = fitComposer;
+
+function renderAttachments() {
+  $('attachments').replaceChildren(...pendingImages.map(entry => {
+    const preview = el('div', 'attachment');
+    const img = el('img');
+    img.src = entry.url;
+    img.alt = entry.file.name || '待傳送圖片';
+    const remove = el('button', '', '×');
+    remove.setAttribute('aria-label', '移除圖片');
+    remove.disabled = sending;
+    remove.onclick = () => {
+      if (sending) return;
+      const index = pendingImages.indexOf(entry);
+      if (index < 0) return;
+      pendingImages.splice(index, 1);
+      URL.revokeObjectURL(entry.url);
+      renderAttachments();
+    };
+    preview.append(img, remove);
+    return preview;
+  }));
+  fitComposer();
+}
+
+function addImages(files) {
+  if (sending) { toast('正在傳送，請稍候'); return; }
+  for (const file of files) {
+    if (!file || !file.type.startsWith('image/')) continue;
+    if (!file.size) { toast('圖片沒有內容，請重新複製'); continue; }
+    if (file.size > maxImageBytes) { toast('單張圖片不能超過 20 MB'); continue; }
+    if (pendingImages.length >= 10) { toast('一次最多傳送 10 張圖片'); break; }
+    pendingImages.push({ file, url: URL.createObjectURL(file) });
+  }
+  renderAttachments();
+}
+
+// A user-initiated paste works without the secure-context-only Clipboard API.
+// Read image files only: never load arbitrary image URLs from pasted HTML.
+draft.addEventListener('paste', event => {
+  const data = event.clipboardData;
+  if (!data) return;
+  const files = Array.from(data.items || [])
+    .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+    .map(item => item.getAsFile()).filter(Boolean);
+  if (!files.length) files.push(...Array.from(data.files || []).filter(file => file.type.startsWith('image/')));
+  if (!files.length) return; // Plain-text paste keeps the browser's default behavior.
+  event.preventDefault();
+  if (sending) { toast('正在傳送，請稍候'); return; }
+  addImages(files);
+  const text = data.getData('text/plain');
+  if (text) {
+    draft.setRangeText(text, draft.selectionStart, draft.selectionEnd, 'end');
+    fitComposer();
+  }
+});
+
 $('pickImage').onclick = () => $('file').click();
-$('file').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  toast('傳送中…');
-  const r = await api('/api/send', { method: 'POST', headers: { 'Content-Type': file.type || 'image/jpeg' }, body: file });
-  e.target.value = '';
-  if (r.ok) { toast('已傳到 Mac'); state.version = ''; load(); } else { toast('傳送失敗'); }
+$('file').onchange = event => {
+  addImages(Array.from(event.target.files || []));
+  event.target.value = '';
 };
+
+$('sendText').onclick = async () => {
+  if (sending) return;
+  if (!draft.value.trim() && !pendingImages.length) { toast('先輸入文字或貼上圖片'); return; }
+  sending = true;
+  draft.readOnly = true;
+  $('sendText').disabled = true;
+  $('sendText').textContent = '傳送中';
+  $('pickImage').disabled = true;
+  renderAttachments();
+  let sent = false;
+  try {
+    // Each item becomes a history entry; the most recently sent item is on the Mac clipboard.
+    if (draft.value.trim()) {
+      const response = await api('/api/send', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: draft.value });
+      if (!response.ok) throw new Error('send failed');
+      draft.value = '';
+      sent = true;
+    }
+    while (pendingImages.length) {
+      const entry = pendingImages[0];
+      const response = await api('/api/send', { method: 'POST', headers: { 'Content-Type': entry.file.type }, body: entry.file });
+      if (!response.ok) throw new Error('send failed');
+      pendingImages.shift();
+      URL.revokeObjectURL(entry.url);
+      sent = true;
+      renderAttachments();
+    }
+    toast('已傳到 Mac');
+  } catch (error) {
+    toast('傳送失敗，未送出的內容已保留');
+  } finally {
+    sending = false;
+    draft.readOnly = false;
+    $('sendText').disabled = false;
+    $('sendText').textContent = '傳送';
+    $('pickImage').disabled = false;
+    renderAttachments();
+    if (sent) { state.version = ''; load(); }
+  }
+};
+window.addEventListener('resize', fitComposer);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', fitComposer);
+if (window.ResizeObserver) new ResizeObserver(fitComposer).observe(document.querySelector('footer'));
+fitComposer();
 
 $('logout').onclick = async () => {
   if (!confirm('要登出這台裝置嗎？下次要重新輸入密碼。')) return;

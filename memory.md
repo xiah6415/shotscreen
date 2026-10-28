@@ -116,3 +116,12 @@ Read `AGENTS.md`, this file, and `HANDOFF TO CLAUDE CODE.md` before modifying ca
 - Validation: swift build --disable-sandbox and git diff --check pass; both named system sounds load successfully. Actual All-in-One interaction and audible distinction await user verification. Continues the unreleased 0.4.0 build.
 
 - Follow-up installed and relaunched /Applications/Glean.app using the existing signing certificate; verified installed binary matches this build. No GitHub publication.
+
+## 2026-10-28 Phone composer image paste (0.4.1)
+- User reported that phone-to-Mac should accept images pasted in the composer, not just text. The existing authenticated /api/send endpoint already supports raw image bodies; no backend protocol change was needed.
+- PhoneSharePage now handles user-initiated paste via clipboardData.items image files, with clipboardData.files fallback. Plain text keeps native paste behavior; mixed text/images retain text. No navigator.clipboard.read or fetching arbitrary pasted HTML image URLs.
+- Images are staged with blob-URL previews and remove controls; both photo picker and paste use the same draft and explicit Send. Supports up to 10 images, each <=20 MiB. Text and images create separate existing history entries in order; the last sent item is on the Mac clipboard. Failed/unsent content stays for retry, already successful items are removed immediately, and duplicate sends are blocked. Preview URLs are revoked on removal/success.
+- Composer/list spacing tracks footer size and viewport resize. Input shrinks on narrow screens. Version is 0.4.1.
+- Validation: swift build --disable-sandbox passes; node scripts/phone-composer-test/test.cjs passes against the actual embedded page script (mock DOM/network, synthetic files only): image paste, file-list fallback, text plus multiple images, remove, size/count limits, network/HTTP failure retention, partial retry and duplicate-send prevention. Actual iPhone Safari clipboard behavior is not yet verified. No real clipboard contents accessed by tests. No publication yet.
+
+- Installed/relaunched universal /Applications/Glean.app using the existing signing identity; verified installed version 0.4.1 and binary matches packaged build. User should reload the phone page to receive the changed composer. Not pushed/published.
