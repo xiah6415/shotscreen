@@ -241,7 +241,7 @@ public sealed class PhoneShareRoutesTests : IDisposable
         Assert.Equal("測試 iPhone", share.Auth.Devices.Single().Name);
         Assert.DoesNotContain(share.Auth.Devices.Single().TokenHash, cookie); // only the hash is stored
 
-        Assert.Contains("傳文字到電腦", await http.GetStringAsync("/"));
+        Assert.Contains("在電腦上複製東西", await http.GetStringAsync("/")); // the signed-in page, with "Mac" worded as 電腦
         var list = JsonDocument.Parse(await http.GetStringAsync("/api/items")).RootElement;
         Assert.Equal("來自電腦", list.GetProperty("items")[0].GetProperty("text").GetString());
         var version = list.GetProperty("version").GetString();
