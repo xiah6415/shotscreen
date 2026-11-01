@@ -12,6 +12,9 @@ internal sealed class ClipboardFeature : IDisposable
     private PhoneShareWindow? phoneShareWindow;
 
     public ClipboardStore Store { get; }
+
+    /// Opens the annotation editor on an image (the bitmap is handed over).
+    public Action<Bitmap>? Annotate { get; init; }
     public PhoneShare PhoneShare { get; }
 
     public ClipboardFeature(AppSettings settings)
@@ -52,7 +55,7 @@ internal sealed class ClipboardFeature : IDisposable
             panel.Close();
             return;
         }
-        panel = new ClipboardPanel(Store, Paste);
+        panel = new ClipboardPanel(Store, Paste, Annotate);
         panel.FormClosed += (_, _) => panel = null;
         panel.ShowPanel();
     }

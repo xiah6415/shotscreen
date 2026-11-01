@@ -80,6 +80,7 @@ dotnet publish src/SuYanShot -c Release -r win-x64 --self-contained false -p:Pub
 | 全螢幕截圖: the monitor under the pointer | Ctrl+Shift+3 | ⌘⇧3 |
 | 延遲截圖: 3 / 5 / 10 s countdown (click the countdown to cancel), then full screen | Ctrl+Shift+4 (3 s) | ⌘⇧4 |
 | 捲動截圖: select a region, scroll down (or turn on 自動捲動); frames are stitched into one tall image. Pressing the shortcut again finishes | Ctrl+Shift+6 | ⌘⇧6 |
+| 標註剪貼簿裡的圖片 (Windows only): opens the annotation editor on the image on the clipboard — copied image data, or an image file copied in Explorer | Ctrl+Shift+7 | — |
 
 Every capture is copied to the clipboard (bitmap + PNG) and shown on a preview card in the bottom-right corner:
 hover for 複製 / 標註 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click (or 標註) to open the
@@ -132,7 +133,8 @@ by content hash. Content marked `ExcludeClipboardContentFromMonitorProcessing`, 
 "paste as plain text" in browsers and Office). Search, filters 全部 · 常用 · 文字 · 圖片 · 檔案 · tags · ＋ (Tab / Shift+Tab),
 ← → select, Enter pastes into the app you were in, Shift+Enter pastes plain text, Ctrl+1–9 quick paste, Ctrl+P 常用,
 Ctrl+Delete deletes, Esc clears the search then closes, clicking elsewhere closes. Right-click a card for 加入常用 / 標籤 /
-刪除, right-click a tag chip to rename or delete it. Pasting needs no permission on Windows; apps running as administrator
+刪除 (image cards also have 標註, which opens the entry in the annotation editor), right-click a tag chip to rename or
+delete it. Pasting needs no permission on Windows; apps running as administrator
 ignore the simulated Ctrl+V (the entry is still on the clipboard). 常用 and tagged entries are never trimmed or cleared.
 
 Settings → 剪貼簿: on/off, keep 50/100/200/500, 清除一般紀錄…. Stored in `%APPDATA%\SuYanShot\settings.json`.
@@ -224,7 +226,7 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 80 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 83 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; phone sharing over loopback (status for off / no password / other network /

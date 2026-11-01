@@ -42,6 +42,7 @@ internal sealed class ClipboardPanel : Form
 
     private readonly ClipboardStore store;
     private readonly Action<ClipboardItem, bool, IntPtr> paste;
+    private readonly Action<Bitmap>? annotate;
     private readonly TextBox search;
     private readonly IntPtr previousWindow;
     private readonly List<Chip> chips = new();
@@ -58,10 +59,11 @@ internal sealed class ClipboardPanel : Form
     private float CardGap => S(14);
     private float TopBarHeight => S(52);
 
-    public ClipboardPanel(ClipboardStore store, Action<ClipboardItem, bool, IntPtr> paste)
+    public ClipboardPanel(ClipboardStore store, Action<ClipboardItem, bool, IntPtr> paste, Action<Bitmap>? annotate = null)
     {
         this.store = store;
         this.paste = paste;
+        this.annotate = annotate;
         previousWindow = GetForegroundWindow();
 
         var screen = ScreenCapture.ScreenUnderCursor();
@@ -269,6 +271,7 @@ internal sealed class ClipboardPanel : Form
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("貼上", null, (_, _) => Paste(item, plainText: false));
+        if (item.Kind == ClipboardKind.Image && annotate != null) menu.Items.Add("標註", null, (_, _) => Annotate(item));
         if (item.Kind == ClipboardKind.RichText) menu.Items.Add("貼上純文字", null, (_, _) => Paste(item, plainText: true));
         menu.Items.Add(item.Pinned ? "移除常用" : "加入常用", null, (_, _) => store.TogglePin(item.Id));
         var tagsMenu = new ToolStripMenuItem("標籤");
@@ -283,6 +286,25 @@ internal sealed class ClipboardPanel : Form
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("刪除", null, (_, _) => store.Delete(item.Id));
         ShowMenu(menu, location);
+    }
+
+    /// Opens the entry's full-size image in the annotation editor and closes the panel.
+    private void Annotate(ClipboardItem item)
+    {
+        if (store.Payload(item.Id, "png") is not byte[] png) return;
+        Bitmap image;
+        try
+        {
+            using var decoded = new Bitmap(new MemoryStream(png));
+            image = new Bitmap(decoded);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        modalOpen = true; // closing ourselves; do not react to the deactivate that follows
+        Close();
+        annotate!(image);
     }
 
     private void ShowTagMenu(Guid tagId, Point location)

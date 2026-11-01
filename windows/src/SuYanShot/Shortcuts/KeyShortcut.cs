@@ -10,6 +10,7 @@ internal enum ShortcutAction
     FullScreen,
     Delayed,
     Scroll,
+    AnnotateClipboard,
     Clipboard,
 }
 

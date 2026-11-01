@@ -16,6 +16,7 @@ internal sealed class SettingsWindow : Form
         (ShortcutAction.FullScreen, "全螢幕截圖"),
         (ShortcutAction.Delayed, "延遲截圖（3 秒）"),
         (ShortcutAction.Scroll, "捲動截圖"),
+        (ShortcutAction.AnnotateClipboard, "標註剪貼簿的圖片"),
         (ShortcutAction.Clipboard, "剪貼簿紀錄"),
     };
 

@@ -16,6 +16,8 @@ internal sealed class ShortcutStore
         [ShortcutAction.FullScreen] = "Ctrl+Shift+3",
         [ShortcutAction.Delayed] = "Ctrl+Shift+4",
         [ShortcutAction.Scroll] = "Ctrl+Shift+6",
+        // Windows-only: annotate whatever image is on the clipboard.
+        [ShortcutAction.AnnotateClipboard] = "Ctrl+Shift+7",
         // macOS uses ⌘⇧V, but Ctrl+Shift+V is "paste as plain text" in browsers and Office, so it stays free here.
         [ShortcutAction.Clipboard] = "Ctrl+Alt+V",
     };

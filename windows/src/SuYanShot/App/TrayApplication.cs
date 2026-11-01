@@ -46,6 +46,8 @@ internal sealed class TrayApplication : ApplicationContext
             delayed.DropDownItems.Add(item);
         }
         menu.Items.Add(delayed);
+        actionItems[ShortcutAction.AnnotateClipboard] = Item("標註剪貼簿裡的圖片", () => coordinator.AnnotateClipboard());
+        menu.Items.Add(actionItems[ShortcutAction.AnnotateClipboard]);
         menu.Items.Add(new ToolStripSeparator());
         actionItems[ShortcutAction.Clipboard] = Item("剪貼簿紀錄", () => clipboard!.TogglePanel());
         menu.Items.Add(actionItems[ShortcutAction.Clipboard]);
@@ -61,7 +63,7 @@ internal sealed class TrayApplication : ApplicationContext
 
         // Created after the menu, so a WinForms synchronization context exists for the clipboard and phone server.
         var settings = AppSettings.Load();
-        clipboard = new ClipboardFeature(settings);
+        clipboard = new ClipboardFeature(settings) { Annotate = coordinator.Annotate };
         updates = new UpdateController(settings) { CanInstallNow = () => !coordinator.IsCapturing, Exit = ExitThread };
 
         trayIcon = new NotifyIcon
@@ -101,9 +103,16 @@ internal sealed class TrayApplication : ApplicationContext
             ShortcutAction.FullScreen => coordinator.CaptureFullScreen(),
             ShortcutAction.Delayed => coordinator.CaptureDelayed(3),
             ShortcutAction.Scroll => coordinator.CaptureScrolling(),
+            ShortcutAction.AnnotateClipboard => Run(coordinator.AnnotateClipboard),
             ShortcutAction.Clipboard => ToggleClipboard(),
             _ => Task.CompletedTask,
         };
+    }
+
+    private static Task Run(Action action)
+    {
+        action();
+        return Task.CompletedTask;
     }
 
     private Task ToggleClipboard()

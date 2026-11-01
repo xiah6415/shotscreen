@@ -152,6 +152,16 @@ internal sealed class CaptureCoordinator
         new FloatingThumbnail(image, exporter, ScreenCapture.ScreenUnderCursor(), OpenEditor).Show();
     }
 
+    /// 標註剪貼簿裡的圖片: opens the editor on an image copied from anywhere (or a copied image file).
+    public void AnnotateClipboard()
+    {
+        if (ClipboardImage.Read() is Bitmap image) OpenEditor(image, DateTime.Now);
+        else MessageBox.Show("剪貼簿裡沒有圖片。先複製一張圖片（或在檔案總管複製圖片檔），再試一次。", "拾光", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// Opens the editor on an image the caller hands over (for example from clipboard history).
+    public void Annotate(Bitmap image) => OpenEditor(image, DateTime.Now);
+
     private void OpenEditor(Bitmap image, DateTime capturedAt)
     {
         var editor = new AnnotationEditor(image, capturedAt, exporter);
