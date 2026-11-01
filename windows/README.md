@@ -177,6 +177,13 @@ already owns are marked 已被其他程式使用. 還原預設 restores the defa
 Shortcuts are stored in `%APPDATA%\SuYanShot\shortcuts.json` (`{ "Region": "Ctrl+Shift+1", ... }`, `""` = cleared).
 Using bare `PrintScreen` needs Windows' own "Use the Print screen key to open screen capture" setting turned off.
 
+Shortcuts are registered with `RegisterHotKey` (which also reports combinations another program owns) and caught first by
+a low-level keyboard hook that swallows them. The hook is what makes them work in full-screen games: many games register
+raw input with `RIDEV_NOHOTKEYS`, which silently disables `RegisterHotKey` while they are in front. Windows does not pass
+input to the hook while a program running as administrator is in front (some games with anti-cheat do); there, only
+`RegisterHotKey` applies. In exclusive full-screen, the region overlays take focus and switch out of the game; 全螢幕截圖
+opens no window and suits games best.
+
 ## Architecture
 
 WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources/SuYanShot`:
@@ -226,7 +233,7 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 
 ## Status and testing
 
-- `dotnet build`: passes with no warnings. `dotnet test`: 83 tests pass — naming, no-overwrite export, shortcut
+- `dotnet build`: passes with no warnings. `dotnet test`: 87 tests pass — naming, no-overwrite export, shortcut
   parsing/store, frozen-desktop cropping, blank detection; clipboard store (ordering, de-duplication, payloads, thumbnails,
   persistence with macOS field values, trimming and clearing with favourites/tags, tag create/rename/toggle/delete, payload
   cleanup); HTTP parsing and private-address checks; phone sharing over loopback (status for off / no password / other network /
@@ -239,6 +246,9 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - Checked by hand on this PC (2026-10-24): Windows' own resolver (`Resolve-DnsName`) found the name published by the responder
   at this PC's address, and with a simulated device already owning the name the responder backed off to `-2`.
 - QR codes: a generated sharing link was decoded with jsQR in a browser and matched exactly.
+- Hotkeys in games: `HotkeyManagerTests` starts a separate "game" process (`tests/fake-game.ps1`) whose foreground window
+  registers raw input with `RIDEV_NOHOTKEYS`; with `RegisterHotKey` alone the injected shortcut is lost (the reported bug), with
+  the hook it fires once. Held keys fire once per press; cleared shortcuts pass through.
 - Updates, checked end to end on this PC against a local feed (2026-10-24) with a signed 0.3.1 "installed" copy and a
   0.3.2 build: the right asset was chosen, downloaded, verified and swapped in, and the new version started, waited for the
   old process and deleted `.old`; a tampered exe (with a matching checksum), an exe signed by another certificate, a wrong
