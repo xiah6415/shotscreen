@@ -34,14 +34,15 @@ struct RegionSelection {
     let screen: NSScreen
     let rectInScreenPoints: CGRect
 
-    /// ScreenCaptureKit source rectangles use top-left-origin backing pixels.
-    var sourceRectPixels: CGRect {
-        let scale = screen.backingScaleFactor
-        let screenFrame = screen.frame
-        let x = rectInScreenPoints.minX * scale
-        let y = (screenFrame.height - rectInScreenPoints.maxY) * scale
-        return CGRect(x: x, y: y, width: rectInScreenPoints.width * scale, height: rectInScreenPoints.height * scale).integral
+    /// Display-local logical points, with the top-left origin ScreenCaptureKit expects.
+    var sourceRectPoints: CGRect {
+        CaptureGeometry.sourceRect(selection: rectInScreenPoints, screenHeight: screen.frame.height)
     }
+
+    var outputPixelSize: CGSize {
+        CaptureGeometry.pixelSize(for: sourceRectPoints, scale: screen.backingScaleFactor)
+    }
+
 }
 
 private final class SelectionView: NSView {

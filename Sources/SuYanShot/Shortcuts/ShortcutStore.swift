@@ -6,6 +6,7 @@ import Carbon.HIToolbox
 @MainActor
 final class ShortcutStore: ObservableObject {
     static let defaults: [ShortcutAction: KeyShortcut] = [
+        .recognizeText: KeyShortcut(keyCode: UInt32(kVK_ANSI_7), modifiers: [.command, .shift], key: "7"),
         .region: KeyShortcut(keyCode: UInt32(kVK_ANSI_1), modifiers: [.command, .shift], key: "1"),
         .window: KeyShortcut(keyCode: UInt32(kVK_ANSI_2), modifiers: [.command, .shift], key: "2"),
         .fullScreen: KeyShortcut(keyCode: UInt32(kVK_ANSI_3), modifiers: [.command, .shift], key: "3"),

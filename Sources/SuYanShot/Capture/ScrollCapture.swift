@@ -16,8 +16,9 @@ protocol ScrollCaptureService: AnyObject {
 
 struct ScrollCaptureConfiguration {
     let display: SCDisplay
-    /// Top-left-origin backing pixels on `display`, as used by `SCStreamConfiguration.sourceRect`.
+    /// Display-local top-left-origin logical points for `SCStreamConfiguration.sourceRect`.
     let sourceRect: CGRect
+    let regionPixelHeight: Int
     /// Centre of the region in global CoreGraphics coordinates, where auto-scroll events are aimed.
     let scrollPoint: CGPoint
     /// Region height in points; auto-scroll step and checkpoint distance derive from it.
@@ -124,7 +125,7 @@ final class ManualScrollCaptureService: ScrollCaptureService {
 
         if state.stalledFrames >= 4 {
             // Nothing moved. If nothing was ever stitched, the wheel direction may be inverted; try the other way once.
-            if !state.triedOtherDirection, stitcher.height == Int(configuration.sourceRect.height) {
+            if !state.triedOtherDirection, stitcher.height == configuration.regionPixelHeight {
                 state.triedOtherDirection = true
                 state.direction = -state.direction
                 state.stalledFrames = 0
@@ -135,7 +136,7 @@ final class ManualScrollCaptureService: ScrollCaptureService {
             }
         }
 
-        let regionPixels = Int(configuration.sourceRect.height)
+        let regionPixels = configuration.regionPixelHeight
         if state.sinceCheckpoint >= regionPixels * 3 {
             state.sinceCheckpoint = 0
             auto = state

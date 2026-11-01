@@ -4,7 +4,7 @@
 Personal, native macOS screenshot tool: a durable replacement for the most-used CleanShot X workflows, not a commercial clone.
 
 ## Technology stack
-Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Vision (reserved), and AVFoundation (reserved). No third-party dependencies.
+Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Vision, and AVFoundation (reserved). No third-party dependencies.
 
 ## Architecture and directory structure
 `Sources/SuYanShot` is divided by responsibility:
@@ -27,7 +27,7 @@ Swift 5.10+, AppKit, SwiftUI, ScreenCaptureKit, Core Graphics, Core Image, Visio
 - Avoid third-party packages and premature abstractions.
 - Build after each cohesive change and add unit tests for deterministic logic.
 - Record material architecture decisions and handoff state in `memory.md`.
-- Do not modify unrelated files or implement OCR, cloud, or accounts in this phase. (The annotation editor, screen recording and GIF export were added at the user's explicit request.)
+- Do not modify unrelated files or implement cloud or accounts in this phase. OCR region-to-clipboard was explicitly requested on 2026-10-28. (The annotation editor, screen recording and GIF export were added at the user's explicit request.)
 
 ## Build and test
 From repository root:

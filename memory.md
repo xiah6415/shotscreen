@@ -12,7 +12,7 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 ## Decisions
 - Use only Apple frameworks; no third-party dependencies.
 - Target macOS 14+, Apple Silicon and Intel through SwiftPM's native universal build support.
-- Use ScreenCaptureKit for capture. Region selection is an AppKit overlay and selected rectangles are converted into per-display pixel coordinates before capture.
+- Use ScreenCaptureKit for capture. Region selection is an AppKit overlay and selected rectangles are converted into display-local top-left logical points for capture; output dimensions are scaled separately to backing pixels.
 - Scroll capture is deliberately an interface-only technical-spike boundary in this phase.
 
 ## Completed
@@ -88,3 +88,40 @@ Swift Package Manager executable using AppKit for application lifecycle and over
 
 ## Next Agent Instructions
 Read `AGENTS.md`, this file, and `HANDOFF TO CLAUDE CODE.md` before modifying capture code. Scroll capture and the annotation editor exist now; recording, OCR, and cloud remain out of scope unless the user asks.
+
+## 2026-10-28 Retina capture coordinate fix
+- Fixed the region offset on Retina displays: SCStreamConfiguration.sourceRect takes display-local logical points (confirmed in the Apple SDK SCStream.h), while width/height take output pixels. Previously the crop origin and extent were multiplied by backingScaleFactor.
+- Region, All-in-One, scroll capture and region recording now pass sourceRectPoints; outputPixelSize stays separate. Scroll checkpoint distances still use pixel heights. Full-display screenshots explicitly request filter.contentRect size × pointPixelScale instead of default output dimensions.
+- Added CaptureGeometry and the XCTest-free regression harness scripts/capture-geometry-test/main.swift. Run: swiftc Sources/SuYanShot/Models/CaptureGeometry.swift scripts/capture-geometry-test/main.swift -o /tmp/glean-capture-geometry-test && /tmp/glean-capture-geometry-test.
+- Validation: geometry checks pass for 1×/2×, full-display and fractional edge selections; swift build --disable-sandbox passes; git diff --check passes. Ordinary swift build hits the execution environment's nested sandbox restriction.
+- Not installed or launched; actual MacBook display alignment, mixed-scale monitors, scrolling and recording still need interactive validation. No Git push.
+
+- Installation follow-up (2026-10-28): scripts/make-app.sh --install succeeded for arm64 + x86_64 with SuYanShot Local Signing; installed /Applications/Glean.app and relaunched. Installed binary matches the packaged fix. Screen alignment still awaits user verification.
+
+- Version follow-up (2026-10-28): bumped VERSION to 0.3.2, rebuilt and installed /Applications/Glean.app; verified installed CFBundleShortVersionString is 0.3.2. No commit, push or GitHub Release.
+
+## 2026-10-28 Region OCR (0.4.0)
+- User requested only region-to-clipboard OCR, not a screenshot-preview button or an editor. Menu 框選辨識文字 and default ⌘⇧7; customizable via the existing shortcut settings. Appended ShortcutAction.recognizeText so persisted numeric IDs remain stable and existing saved shortcuts get the new default through knownActions migration.
+- OCR/TextRecognitionService.swift is a separate actor using Vision VNRecognizeTextRequest (.accurate, zh-Hant + en-US, language correction). Recognition runs off MainActor and preserves Vision's line breaks; no network, image file, or API dependency.
+- Coordinator uses the existing Retina-correct region capture/permission path. Nonactivating TextRecognitionHUD shows progress, success, or no text. Only a nonempty successful result writes plain text to the clipboard; cancellation, capture/recognition failure and blank results leave it alone. Existing clipboard history can record recognized text when enabled.
+- swift build --disable-sandbox passes. scripts/ocr-test/OCRSmoke.swift generates an image and verifies English, Traditional Chinese, line breaks and blank-image results; passed outside the execution sandbox (Vision fails with generic nilError inside it). Compile/run: swiftc -parse-as-library Sources/SuYanShot/OCR/TextRecognitionService.swift scripts/ocr-test/OCRSmoke.swift -o /tmp/glean-ocr-test && /tmp/glean-ocr-test.
+- No actual screen contents or clipboard were read/written by the OCR test. Interactive region selection/hotkey/paste remain for user verification. VERSION bumped to 0.4.0 for this added feature; not published.
+
+- Built arm64 + x86_64 with the existing SuYanShot Local Signing identity; installed and relaunched /Applications/Glean.app. Verified installed 0.4.0 and executable hash matches packaged app. No commit/push/Release for OCR yet.
+
+## 2026-10-28 OCR naming, All-in-One and completion sounds
+- User requested the visible name OCR, an All-in-One option, and different OCR/screenshot sounds. Renamed menu/shortcut title/documentation to OCR; kept action IDs and ⌘⇧7 unchanged.
+- All-in-One capture toolbar now has OCR (disabled without a region); O runs it after selection. Toolbar width is 590 pt to fit the added button. The selected region goes through the same recognizeText(in:) helper as the dedicated shortcut, without asking for a second selection.
+- UI/CompletionSound.swift retains two native NSSounds: screenshot Pop and OCR Tink. Screenshot sound is called from the shared finish path (region/window/display/scroll), OCR sound only after nonempty recognized text is successfully copied. No success sound for cancellation, blank OCR or failure.
+- Validation: swift build --disable-sandbox and git diff --check pass; both named system sounds load successfully. Actual All-in-One interaction and audible distinction await user verification. Continues the unreleased 0.4.0 build.
+
+- Follow-up installed and relaunched /Applications/Glean.app using the existing signing certificate; verified installed binary matches this build. No GitHub publication.
+
+## 2026-10-28 Phone composer image paste (0.4.1)
+- User reported that phone-to-Mac should accept images pasted in the composer, not just text. The existing authenticated /api/send endpoint already supports raw image bodies; no backend protocol change was needed.
+- PhoneSharePage now handles user-initiated paste via clipboardData.items image files, with clipboardData.files fallback. Plain text keeps native paste behavior; mixed text/images retain text. No navigator.clipboard.read or fetching arbitrary pasted HTML image URLs.
+- Images are staged with blob-URL previews and remove controls; both photo picker and paste use the same draft and explicit Send. Supports up to 10 images, each <=20 MiB. Text and images create separate existing history entries in order; the last sent item is on the Mac clipboard. Failed/unsent content stays for retry, already successful items are removed immediately, and duplicate sends are blocked. Preview URLs are revoked on removal/success.
+- Composer/list spacing tracks footer size and viewport resize. Input shrinks on narrow screens. Version is 0.4.1.
+- Validation: swift build --disable-sandbox passes; node scripts/phone-composer-test/test.cjs passes against the actual embedded page script (mock DOM/network, synthetic files only): image paste, file-list fallback, text plus multiple images, remove, size/count limits, network/HTTP failure retention, partial retry and duplicate-send prevention. Actual iPhone Safari clipboard behavior is not yet verified. No real clipboard contents accessed by tests. No publication yet.
+
+- Installed/relaunched universal /Applications/Glean.app using the existing signing identity; verified installed version 0.4.1 and binary matches packaged build. User should reload the phone page to receive the changed composer. Not pushed/published.
