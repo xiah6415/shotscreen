@@ -28,8 +28,11 @@ try {
 
     if ($DryRun) { Write-Output "Dry run: nothing published"; return }
 
-    gh release view $tag --repo $repo --json assets --jq '.assets[].name' 2>$null | Set-Variable existing
+    # gh reports a missing release on stderr, which Windows PowerShell turns into a terminating error under 'Stop'.
+    $ErrorActionPreference = 'Continue'
+    $existing = gh release view $tag --repo $repo --json assets --jq '.assets[].name' 2>$null
     $releaseExists = $LASTEXITCODE -eq 0
+    $ErrorActionPreference = 'Stop'
     if ($releaseExists -and ($existing -contains (Split-Path $exe -Leaf))) { throw "$tag already has the Windows build; bump VERSION" }
 
     if (-not $Yes) {
