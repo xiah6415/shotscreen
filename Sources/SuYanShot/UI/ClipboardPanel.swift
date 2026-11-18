@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class ClipboardPanelController: NSObject {
     var onPaste: ((ClipboardItem, _ plainText: Bool) -> Void)?
+    var onAnnotate: ((ClipboardItem) -> Void)?
 
     private let store: ClipboardStore
     private let model = ClipboardPanelModel()
@@ -38,7 +39,8 @@ final class ClipboardPanelController: NSObject {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: ClipboardPanelView(
             store: store, model: model,
-            onPaste: { [weak self] item, plain in self?.paste(item, plainText: plain) }
+            onPaste: { [weak self] item, plain in self?.paste(item, plainText: plain) },
+            onAnnotate: { [weak self] item in self?.close(); self?.onAnnotate?(item) }
         ))
         panel.alphaValue = 0
         panel.makeKeyAndOrderFront(nil)
@@ -189,6 +191,7 @@ private struct ClipboardPanelView: View {
     @ObservedObject var store: ClipboardStore
     @ObservedObject var model: ClipboardPanelModel
     let onPaste: (ClipboardItem, Bool) -> Void
+    let onAnnotate: (ClipboardItem) -> Void
     private enum Field { case search, tag }
     @FocusState private var focus: Field?
 
@@ -332,6 +335,7 @@ private struct ClipboardPanelView: View {
     @ViewBuilder private func cardMenu(_ item: ClipboardItem) -> some View {
         Button("貼上") { onPaste(item, false) }
         if item.kind == .richText { Button("貼上為純文字") { onPaste(item, true) } }
+        if item.kind == .image { Button("標註") { onAnnotate(item) } }
         Button(item.pinned ? "移出常用" : "加入常用") { store.togglePin(item.id) }
         Menu("標籤") {
             ForEach(store.tags) { tag in

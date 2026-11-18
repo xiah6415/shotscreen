@@ -43,6 +43,8 @@ final class MenuBarController: NSObject {
         [ShortcutAction.region, .window, .fullScreen, .scroll].forEach { menu.addItem(actionItems[$0]!) }
         actionItems[.recognizeText] = item("OCR", symbol: "text.viewfinder", action: #selector(recognizeText))
         menu.addItem(actionItems[.recognizeText]!)
+        actionItems[.annotateClipboard] = item("標註剪貼簿裡的圖片", symbol: "pencil.and.outline", action: #selector(annotateClipboard))
+        menu.addItem(actionItems[.annotateClipboard]!)
         let delayed = item("延遲截圖", symbol: "timer", action: nil)
         let delayedMenu = NSMenu(title: "延遲截圖")
         for option in DelayOption.allCases {
@@ -121,6 +123,7 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func allInOneCapture() { coordinator.captureAllInOne() }
+    @objc private func annotateClipboard() { coordinator.annotateClipboardImage() }
     @objc private func recognizeText() { coordinator.recognizeText() }
     @objc private func regionCapture() { coordinator.captureRegion() }
     @objc private func windowCapture() { coordinator.captureWindow() }

@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self?.menuBarController?.setPhoneShare(enabled: enabled, serving: status == .running, note: enabled ? note : nil)
         }
+        clipboard.onAnnotate = { [weak self] image in self?.coordinator.annotate(image) }
         shortcuts.onAction = { [weak self] action in
             switch action {
             case .recognizeText: self?.coordinator.recognizeText()
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .allInOne: self?.coordinator.captureAllInOne()
             case .clipboard: self?.clipboard.togglePanel()
             case .record: self?.coordinator.recordRegion()
+            case .annotateClipboard: self?.coordinator.annotateClipboardImage()
             }
         }
         shortcutStore.onChange = { [weak self] in self?.applyShortcuts() }
@@ -281,6 +283,24 @@ final class CaptureCoordinator {
     func captureDelayed(_ delay: DelayOption) {
         guard ensurePermission() else { return }
         countdown.start(seconds: delay.rawValue) { [weak self] in self?.captureFullScreen() }
+    }
+
+    /// 標註剪貼簿裡的圖片: opens the editor on an image copied from anywhere (or an image file copied in Finder).
+    func annotateClipboardImage() {
+        guard let image = ClipboardImage.read() else {
+            let alert = NSAlert()
+            alert.messageText = "剪貼簿裡沒有圖片"
+            alert.informativeText = "先複製一張圖片（或在 Finder 複製圖片檔），再試一次。"
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+        annotate(image)
+    }
+
+    /// Opens the editor on an image that did not come from a capture (clipboard, history).
+    func annotate(_ image: CGImage) {
+        annotate(CapturedImage(image: image, mode: .region, capturedAt: .now))
     }
 
     func annotate(_ captured: CapturedImage) {
