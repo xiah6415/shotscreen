@@ -79,11 +79,13 @@ final class ScrollCaptureHUD {
         switch (progress.auto, progress.lastResult) {
         case (_, .limitReached): model.message = "已達長度上限，請按完成"
         case (.checkpoint, _): model.message = "已自動往下捲了一段，要繼續嗎？"
-        case (.reachedEnd, _): model.message = "已經到底了，按完成產生長圖"
+        case (.paused(.noMovement), _): model.message = "畫面未移動，可能到底或選錯範圍"
+        case (.paused(.cannotStitch), _): model.message = "連續拼接失敗，已暫停自動捲動"
+        case (.paused(.noProgress), _): model.message = "一段時間沒有新內容，已暫停"
+        case (.paused(.captureFailed), _): model.message = "畫面擷取失敗，請檢查權限後重試"
         case (.running, _): model.message = nil
         case (.off, .rejected): model.message = "沒對上，請慢一點往下捲"
-        case (.off, .appended): model.message = nil
-        case (.off, _): break
+        case (.off, _): model.message = nil
         }
     }
 
@@ -175,8 +177,12 @@ extension ScrollHUDView {
             Button { onAutoScroll(true) } label: { Label("繼續往下", systemImage: "arrow.down") }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
-        case .reachedEnd:
-            EmptyView()
+        case .paused(.captureFailed):
+            Button { onAutoScroll(false) } label: { Label("重試", systemImage: "arrow.clockwise") }
+                .help("重試擷取畫面；成功後可以手動捲動，或再開啟自動捲動")
+        case .paused:
+            Button { onAutoScroll(true) } label: { Label("重試", systemImage: "arrow.clockwise") }
+                .help("確認頁面已載入且範圍可捲動後，重試自動捲動；也可以按完成保留目前長圖")
         }
     }
 }

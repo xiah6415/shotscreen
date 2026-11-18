@@ -32,8 +32,8 @@ enum AutoScrollStatus: Equatable {
     case running
     /// Stopped after a stretch of auto scrolling; waiting for the user to continue or finish.
     case checkpoint
-    /// Nothing moves any more.
-    case reachedEnd
+    /// Auto scrolling stopped; the user can retry, scroll manually, or finish.
+    case paused(ScrollPauseReason)
 }
 
 struct ScrollCaptureProgress {
@@ -49,7 +49,6 @@ final class ManualScrollCaptureService: ScrollCaptureService {
     private struct AutoScrollState {
         var step: Int
         var sinceCheckpoint = 0
-        var stalledFrames = 0
         var direction = -1 // negative wheel delta scrolls toward the end
         var triedOtherDirection = false
     }
@@ -60,6 +59,8 @@ final class ManualScrollCaptureService: ScrollCaptureService {
     private var configuration: ScrollCaptureConfiguration?
     private var auto: AutoScrollState?
     private var autoStatus: AutoScrollStatus = .off
+    private var watchdog = ScrollProgressWatchdog()
+    private var captureSuspended = false
 
     init(captureService: ScreenCaptureService) { self.captureService = captureService }
 
@@ -70,8 +71,13 @@ final class ManualScrollCaptureService: ScrollCaptureService {
         self.configuration = configuration
         loop = Task { @MainActor [captureService, weak self] in
             while !Task.isCancelled {
+                if self?.captureSuspended == true {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    continue
+                }
                 let began = ContinuousClock.now
-                if let frame = try? await captureService.capture(display: configuration.display, sourceRect: configuration.sourceRect) {
+                do {
+                    let frame = try await captureService.capture(display: configuration.display, sourceRect: configuration.sourceRect)
                     // Matching is CPU work; keep it off the main thread.
                     let (result, preview) = await Task.detached(priority: .userInitiated) { () -> (ScrollStitcher.FrameResult, CGImage?) in
                         let result = stitcher.add(frame)
@@ -81,10 +87,19 @@ final class ManualScrollCaptureService: ScrollCaptureService {
                         }
                     }.value
                     guard let self, !Task.isCancelled else { break }
+                    self.watchdog.captureSucceeded()
                     if result == .limitReached { self.stopAuto(.off) }
                     self.advanceAutoScroll(after: result)
                     onProgress(ScrollCaptureProgress(height: stitcher.height, lastResult: result, preview: preview, auto: self.autoStatus))
                     if result == .limitReached { break }
+                } catch {
+                    guard let self, !Task.isCancelled else { break }
+                    if let reason = self.watchdog.captureFailed() {
+                        self.stopAuto(.paused(reason))
+                        self.captureSuspended = true
+                        onProgress(ScrollCaptureProgress(height: stitcher.height, lastResult: .rejected,
+                                                         preview: nil, auto: self.autoStatus))
+                    }
                 }
                 let interval = self?.autoStatus == .running ? configuration.autoInterval : configuration.interval
                 let remaining = interval - (ContinuousClock.now - began)
@@ -95,11 +110,12 @@ final class ManualScrollCaptureService: ScrollCaptureService {
 
     func setAutoScroll(_ enabled: Bool) {
         guard let configuration else { return }
+        captureSuspended = false
+        watchdog.reset()
         if enabled {
             let step = max(60, Int(configuration.regionHeightPoints * 0.35))
             auto = auto ?? AutoScrollState(step: step)
             auto?.sinceCheckpoint = 0
-            auto?.stalledFrames = 0
             autoStatus = .running
             AutoScroller.moveCursor(to: configuration.scrollPoint)
         } else {
@@ -110,28 +126,32 @@ final class ManualScrollCaptureService: ScrollCaptureService {
     /// One auto-scroll decision per captured frame: scroll on, back off, pause at a checkpoint, or stop at the end.
     private func advanceAutoScroll(after result: ScrollStitcher.FrameResult) {
         guard autoStatus == .running, var state = auto, let configuration, let stitcher else { return }
+        let frame: ScrollProgressWatchdog.Frame
         switch result {
         case let .appended(rows):
             state.sinceCheckpoint += rows
-            state.stalledFrames = 0
+            frame = .appended
         case .unchanged:
-            state.stalledFrames += 1
+            frame = .unchanged
         case .rejected:
-            // Scrolled further than the stitcher can follow; take smaller steps.
             state.step = max(30, state.step * 2 / 3)
-        case .first, .limitReached:
-            break
+            frame = .rejected
+        case .first:
+            frame = .first
+        case .limitReached:
+            return
         }
 
-        if state.stalledFrames >= 4 {
-            // Nothing moved. If nothing was ever stitched, the wheel direction may be inverted; try the other way once.
-            if !state.triedOtherDirection, stitcher.height == configuration.regionPixelHeight {
+        if let reason = watchdog.observe(frame) {
+            // Try the opposite direction only once, and only before any content has been appended.
+            if reason == .noMovement, !state.triedOtherDirection,
+               stitcher.height == configuration.regionPixelHeight {
                 state.triedOtherDirection = true
                 state.direction = -state.direction
-                state.stalledFrames = 0
+                watchdog.reset()
             } else {
                 auto = state
-                stopAuto(.reachedEnd)
+                stopAuto(.paused(reason))
                 return
             }
         }
@@ -158,6 +178,9 @@ final class ManualScrollCaptureService: ScrollCaptureService {
         loop = nil
         auto = nil
         autoStatus = .off
+        configuration = nil
+        captureSuspended = false
+        watchdog.reset()
         defer { stitcher = nil }
         guard let stitcher else { return nil }
         return await Task.detached(priority: .userInitiated) { stitcher.makeImage() }.value
@@ -169,5 +192,8 @@ final class ManualScrollCaptureService: ScrollCaptureService {
         stitcher = nil
         auto = nil
         autoStatus = .off
+        configuration = nil
+        captureSuspended = false
+        watchdog.reset()
     }
 }
