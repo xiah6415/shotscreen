@@ -2,7 +2,7 @@ using System.Media;
 
 namespace SuYanShot.UI;
 
-/// A short native sound played only after a successful capture, as on macOS (which plays "Pop").
+/// Short native sounds played only after a successful capture or OCR copy, as on macOS ("Pop" and "Tink").
 internal static class CompletionSound
 {
     // Windows' own short click; missing on trimmed-down installs, where the system "Asterisk" sound stands in.
@@ -21,6 +21,13 @@ internal static class CompletionSound
             return null;
         }
     });
+
+    /// A different sound from captures, so an OCR copy is recognisable by ear.
+    public static void Ocr()
+    {
+        try { SystemSounds.Asterisk.Play(); }
+        catch (InvalidOperationException) { }
+    }
 
     public static void Screenshot()
     {

@@ -49,6 +49,8 @@ internal sealed class TrayApplication : ApplicationContext
             delayed.DropDownItems.Add(item);
         }
         menu.Items.Add(delayed);
+        actionItems[ShortcutAction.RecognizeText] = Item("OCR", () => coordinator.RecognizeText());
+        menu.Items.Add(actionItems[ShortcutAction.RecognizeText]);
         actionItems[ShortcutAction.AnnotateClipboard] = Item("標註剪貼簿裡的圖片", () => coordinator.AnnotateClipboard());
         menu.Items.Add(actionItems[ShortcutAction.AnnotateClipboard]);
         menu.Items.Add(new ToolStripSeparator());
@@ -123,6 +125,7 @@ internal sealed class TrayApplication : ApplicationContext
             ShortcutAction.Delayed => coordinator.CaptureDelayed(3),
             ShortcutAction.Scroll => coordinator.CaptureScrolling(),
             ShortcutAction.AnnotateClipboard => Run(coordinator.AnnotateClipboard),
+            ShortcutAction.RecognizeText => coordinator.RecognizeText(),
             ShortcutAction.Clipboard => ToggleClipboard(),
             _ => Task.CompletedTask,
         };

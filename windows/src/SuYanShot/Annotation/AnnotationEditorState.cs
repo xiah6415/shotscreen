@@ -59,6 +59,22 @@ internal sealed class AnnotationEditorState
         set { selectedId = value; Changed?.Invoke(); }
     }
 
+    public enum TextRecognitionStatus { Idle, Working, Done, Failed }
+
+    /// 辨識文字: recognized once per editor, on the original capture (annotations don't change it).
+    public TextRecognitionStatus TextRecognition { get; private set; }
+    public Ocr.OcrTextSelection? RecognizedText { get; private set; }
+
+    public void SetTextRecognition(TextRecognitionStatus status, Ocr.OcrTextSelection? text = null)
+    {
+        TextRecognition = status;
+        if (text != null) RecognizedText = text;
+        Changed?.Invoke();
+    }
+
+    /// Call after changing <see cref="RecognizedText"/>'s selection, so the canvas and toolbar redraw.
+    public void TextSelectionChanged() => Changed?.Invoke();
+
     public float LineWidth => new[] { 3f, 5f, 9f }[SizeLevel] * PixelScale;
     public float FontSize => new[] { 16f, 22f, 32f }[SizeLevel] * PixelScale;
 

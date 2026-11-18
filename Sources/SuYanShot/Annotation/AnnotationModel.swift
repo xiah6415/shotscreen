@@ -1,7 +1,7 @@
 import AppKit
 
 enum AnnotationTool: String, CaseIterable, Identifiable {
-    case select, crop, arrow, rectangle, ellipse, line, pen, highlighter, text, counter, pixelate, blur
+    case select, crop, recognizeText, arrow, rectangle, ellipse, line, pen, highlighter, text, counter, pixelate, blur
 
     var id: String { rawValue }
 
@@ -9,6 +9,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
         switch self {
         case .select: "選取"
         case .crop: "裁切"
+        case .recognizeText: "辨識文字（OCR）"
         case .arrow: "箭頭"
         case .rectangle: "矩形"
         case .ellipse: "橢圓"
@@ -26,6 +27,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
         switch self {
         case .select: "cursorarrow"
         case .crop: "crop"
+        case .recognizeText: "text.viewfinder"
         case .arrow: "arrow.up.right"
         case .rectangle: "rectangle"
         case .ellipse: "circle"
@@ -44,6 +46,7 @@ enum AnnotationTool: String, CaseIterable, Identifiable {
         switch self {
         case .select: "v"
         case .crop: "c"
+        case .recognizeText: "x"
         case .arrow: "a"
         case .rectangle: "r"
         case .ellipse: "o"

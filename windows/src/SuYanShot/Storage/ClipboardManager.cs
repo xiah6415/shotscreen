@@ -13,4 +13,18 @@ internal static class ClipboardManager
         // The clipboard can be briefly locked by another process; retry a few times before giving up.
         Clipboard.SetDataObject(data, copy: true, retryTimes: 5, retryDelay: 100);
     }
+
+    /// OCR results. False when another process kept the clipboard locked.
+    public static bool CopyText(string text)
+    {
+        try
+        {
+            Clipboard.SetDataObject(new DataObject(DataFormats.UnicodeText, text), copy: true, retryTimes: 5, retryDelay: 100);
+            return true;
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return false;
+        }
+    }
 }

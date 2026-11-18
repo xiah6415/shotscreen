@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using SuYanShot.Ocr;
 
 namespace SuYanShot.Annotations;
 
@@ -18,6 +19,9 @@ internal sealed class AnnotationCanvas : Control
     private TextBox? textBox;
     private Guid? editingTextId;
     private PointF textAnchor;
+    /// 辨識文字: where a selection drag started (image pixels) and its current rectangle.
+    private PointF? ocrAnchor;
+    private RectangleF? ocrDrag;
 
     public AnnotationCanvas(AnnotationEditorState state, Bitmap source)
     {
@@ -38,7 +42,7 @@ internal sealed class AnnotationCanvas : Control
         Cursor = state.Tool switch
         {
             AnnotationTool.Select => Cursors.Default,
-            AnnotationTool.Text => Cursors.IBeam,
+            AnnotationTool.Text or AnnotationTool.RecognizeText => Cursors.IBeam,
             _ => Cursors.Cross,
         };
         Invalidate();
@@ -118,6 +122,7 @@ internal sealed class AnnotationCanvas : Control
         g.Restore(state0);
 
         if (state.Tool == AnnotationTool.Crop) DrawCropOverlay(g);
+        if (state.Tool == AnnotationTool.RecognizeText) DrawRecognizedText(g);
 
         if (state.Selected is Annotation selected && selected.Id != editingTextId)
         {
@@ -125,6 +130,57 @@ internal sealed class AnnotationCanvas : Control
             using var pen = new Pen(Color.FromArgb(10, 132, 255), 1) { DashStyle = DashStyle.Dash };
             g.DrawRectangle(pen, box.X, box.Y, box.Width, box.Height);
         }
+    }
+
+    /// Every recognized line gets a soft box; selected ones are filled, like selected text.
+    private void DrawRecognizedText(Graphics g)
+    {
+        using (var dim = new SolidBrush(Color.FromArgb(64, 0, 0, 0))) g.FillRectangle(dim, ImageRect);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var accent = Color.FromArgb(10, 132, 255);
+        string hint;
+        if (state.RecognizedText is not OcrTextSelection recognized)
+        {
+            hint = state.TextRecognition == AnnotationEditorState.TextRecognitionStatus.Working ? "辨識文字中…" : "";
+        }
+        else
+        {
+            for (var i = 0; i < recognized.Lines.Count; i++)
+            {
+                var box = RectangleF.Inflate(ToView(recognized.Lines[i].Box), S(2), S(2));
+                var selected = recognized.Selected.Contains(i);
+                using var path = AnnotationRenderer.RoundedRect(box, S(3));
+                using var fill = new SolidBrush(Color.FromArgb(selected ? 115 : 30, accent));
+                using var edge = new Pen(Color.FromArgb(selected ? 240 : 150, accent), 1);
+                g.FillPath(fill, path);
+                g.DrawPath(edge, path);
+            }
+            if (ocrDrag is RectangleF drag)
+            {
+                var view = ToView(drag);
+                using var pen = new Pen(Color.White, 1) { DashStyle = DashStyle.Dash };
+                g.DrawRectangle(pen, view.X, view.Y, view.Width, view.Height);
+            }
+            hint = recognized.Lines.Count == 0 ? "沒有找到文字"
+                : recognized.Selected.Count == 0 ? "點選或拖曳選取文字 · Ctrl+A 全選 · Ctrl+C 複製全部"
+                : $"已選 {recognized.Selected.Count} 行 · Ctrl+C 複製 · Shift 加選";
+        }
+        g.SmoothingMode = SmoothingMode.None;
+        if (hint.Length > 0) DrawLabel(g, hint, ImageRect.Location);
+    }
+
+    private void DrawLabel(Graphics g, string text, PointF near)
+    {
+        using var font = new Font("Microsoft JhengHei UI", S(12), GraphicsUnit.Pixel);
+        var size = g.MeasureString(text, font);
+        var label = new RectangleF(near.X, near.Y - size.Height - S(10), size.Width + S(12), size.Height + S(6));
+        if (label.Y < 0) label.Y = near.Y + S(6);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var background = new SolidBrush(Color.FromArgb(210, 20, 20, 20)))
+        using (var path = AnnotationRenderer.RoundedRect(label, S(4)))
+            g.FillPath(background, path);
+        g.DrawString(text, font, Brushes.White, label.X + S(6), label.Y + S(3));
+        g.SmoothingMode = SmoothingMode.None;
     }
 
     /// Dims everything outside the pending (or current) crop and labels its size.
@@ -188,6 +244,11 @@ internal sealed class AnnotationCanvas : Control
                 var textHit = state.Hit(point, tolerance);
                 BeginText(point, textHit is { Kind: AnnotationKind.Text } ? textHit : null);
                 break;
+            case AnnotationTool.RecognizeText:
+                ocrAnchor = point;
+                ocrDrag = null;
+                state.RecognizedText?.BeginDrag(adding: (ModifierKeys & Keys.Shift) != 0);
+                break;
             case AnnotationTool.Counter:
                 if (state.NewAnnotation(point) is Annotation counter) state.Add(counter);
                 break;
@@ -209,6 +270,18 @@ internal sealed class AnnotationCanvas : Control
             state.Move(id, point.X - anchor.X, point.Y - anchor.Y);
             dragAnchor = point;
         }
+        else if (state.Tool == AnnotationTool.RecognizeText && ocrAnchor is PointF ocrStart)
+        {
+            var box = RectangleF.FromLTRB(Math.Min(ocrStart.X, point.X), Math.Min(ocrStart.Y, point.Y), Math.Max(ocrStart.X, point.X), Math.Max(ocrStart.Y, point.Y));
+            if (ocrDrag == null && Math.Max(box.Width, box.Height) * ViewScale < 3) return; // still a click
+            ocrDrag = box;
+            if (state.RecognizedText is OcrTextSelection selection)
+            {
+                selection.Drag(box);
+                state.TextSelectionChanged();
+            }
+            else Invalidate();
+        }
         else if (state.Tool == AnnotationTool.Crop && cropAnchor is PointF start)
         {
             var end = shift ? Constrained(start, point, AnnotationKind.Rectangle) : point;
@@ -228,6 +301,18 @@ internal sealed class AnnotationCanvas : Control
     protected override void OnMouseUp(MouseEventArgs e)
     {
         dragAnchor = null;
+        if (state.Tool == AnnotationTool.RecognizeText)
+        {
+            if (ocrDrag == null && ocrAnchor is PointF clicked && state.RecognizedText is OcrTextSelection selection)
+            {
+                selection.Click(clicked, toggle: (ModifierKeys & Keys.Shift) != 0, tolerance: S(4) / ViewScale);
+                state.TextSelectionChanged();
+            }
+            ocrAnchor = null;
+            ocrDrag = null;
+            Invalidate();
+            return;
+        }
         if (state.Tool == AnnotationTool.Crop)
         {
             cropAnchor = null;
@@ -305,6 +390,10 @@ internal sealed class AnnotationCanvas : Control
                 return true;
             case Keys.Enter when state.Selected is { Kind: AnnotationKind.Text } text:
                 BeginText(text.Start, text);
+                return true;
+            case Keys.Escape when state.Tool == AnnotationTool.RecognizeText && state.RecognizedText != null:
+                state.RecognizedText.Clear();
+                state.TextSelectionChanged();
                 return true;
             case Keys.Escape:
                 if (draft != null) { draft = null; Invalidate(); } else state.SelectedId = null;

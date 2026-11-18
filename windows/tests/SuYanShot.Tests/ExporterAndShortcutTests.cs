@@ -77,8 +77,9 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         var shortcuts = new ShortcutStore(file).Load();
         Assert.Equal("Ctrl+Shift+1", shortcuts[ShortcutAction.Region].ToString());
-        Assert.Equal(8, shortcuts.Count);
-        Assert.Equal("Ctrl+Shift+7", shortcuts[ShortcutAction.AnnotateClipboard].ToString());
+        Assert.Equal(9, shortcuts.Count);
+        Assert.Equal("Ctrl+Shift+7", shortcuts[ShortcutAction.RecognizeText].ToString());
+        Assert.Equal("Ctrl+Shift+8", shortcuts[ShortcutAction.AnnotateClipboard].ToString());
         Assert.Equal("Ctrl+Shift+6", shortcuts[ShortcutAction.Scroll].ToString());
         Assert.Equal("Ctrl+Shift+5", shortcuts[ShortcutAction.AllInOne].ToString());
         Assert.Equal("Ctrl+Alt+V", shortcuts[ShortcutAction.Clipboard].ToString());
@@ -112,8 +113,19 @@ public sealed class ShortcutStoreTests : IDisposable
         store.Set(ShortcutAction.Delayed, null);
         Assert.False(new ShortcutStore(file).Load().ContainsKey(ShortcutAction.Delayed));
 
-        Assert.Equal(8, store.ResetToDefaults().Count);
+        Assert.Equal(9, store.ResetToDefaults().Count);
         Assert.False(File.Exists(file));
+    }
+
+    [Fact]
+    public void OlderFileKeepsItsAnnotateKeyAndLeavesOcrUnassigned()
+    {
+        // Written before OCR existed, when 標註剪貼簿裡的圖片 defaulted to Ctrl+Shift+7.
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, """{ "AnnotateClipboard": "Ctrl+Shift+7", "Region": "Ctrl+Shift+1" }""");
+        var shortcuts = new ShortcutStore(file).Load();
+        Assert.Equal("Ctrl+Shift+7", shortcuts[ShortcutAction.AnnotateClipboard].ToString());
+        Assert.False(shortcuts.ContainsKey(ShortcutAction.RecognizeText));
     }
 
     [Fact]
@@ -121,7 +133,7 @@ public sealed class ShortcutStoreTests : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, "{ not json");
-        Assert.Equal(8, new ShortcutStore(file).Load().Count);
+        Assert.Equal(9, new ShortcutStore(file).Load().Count);
     }
 
     public void Dispose()

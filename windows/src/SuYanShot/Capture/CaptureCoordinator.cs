@@ -1,4 +1,5 @@
 using SuYanShot.Annotations;
+using SuYanShot.Ocr;
 using SuYanShot.Storage;
 using SuYanShot.UI;
 
@@ -12,6 +13,8 @@ internal sealed class CaptureCoordinator
     private bool busy;
     private ScrollCaptureSession? scrolling;
     private ScrollCaptureHud? scrollHud;
+    private readonly TextRecognitionHud textHud = new();
+    private bool recognizing;
 
     /// A selection overlay or a scroll capture is in progress (updates wait for it).
     public bool IsCapturing => busy || scrolling != null;
@@ -46,6 +49,7 @@ internal sealed class CaptureCoordinator
         {
             AllInOneAction.Capture capture => desktop.Crop(capture.ScreenRect),
             AllInOneAction.Scroll scroll => StartScrolling(scroll.ScreenRect),
+            AllInOneAction.RecognizeText ocr => RecognizeTextLater(desktop.Crop(ocr.ScreenRect), ocr.ScreenRect),
             AllInOneAction.Window => await PickWindow(desktop, windows),
             AllInOneAction.FullScreen full => desktop.Crop(full.Monitor),
             _ => null,
@@ -58,6 +62,70 @@ internal sealed class CaptureCoordinator
         if (result is not SelectionResult.Window window) return null;
         await Task.Delay(50); // let the overlays disappear before PrintWindow asks the window to repaint
         return ScreenCapture.CaptureWindow(window.Info.Handle, desktop);
+    }
+
+    /// OCR: select a region, recognize its text offline and copy it (as on macOS).
+    public async Task RecognizeText()
+    {
+        if (busy || recognizing) return;
+        busy = true;
+        Bitmap? image = null;
+        Rectangle rect = default;
+        try
+        {
+            using var desktop = ScreenCapture.FreezeDesktop();
+            if (await SelectionSession.Run(desktop, SelectionMode.Region, Array.Empty<WindowInfo>()) is SelectionResult.Region region)
+            {
+                rect = region.ScreenRect;
+                image = desktop.Crop(rect);
+            }
+        }
+        finally
+        {
+            busy = false;
+        }
+        if (image != null) await RecognizeAndCopy(image, rect);
+    }
+
+    /// All-in-One hands over the cropped region; recognition runs after the overlay has closed.
+    private Bitmap? RecognizeTextLater(Bitmap image, Rectangle rect)
+    {
+        _ = RecognizeAndCopy(image, rect);
+        return null;
+    }
+
+    private async Task RecognizeAndCopy(Bitmap image, Rectangle rect)
+    {
+        if (recognizing) { image.Dispose(); return; }
+        recognizing = true;
+        var screen = Screen.FromRectangle(rect);
+        textHud.ShowMessage("OCR 辨識中…", screen, working: true);
+        try
+        {
+            var text = await TextRecognitionService.Recognize(image);
+            if (text.Length == 0) textHud.ShowMessage("沒有找到文字，請重新框選", screen);
+            else if (!ClipboardManager.CopyText(text)) textHud.ShowMessage("無法複製文字，請再試一次", screen);
+            else
+            {
+                CompletionSound.Ocr();
+                textHud.ShowMessage("OCR 文字已複製，可以直接貼上", screen);
+            }
+        }
+        catch (TextRecognitionService.NoLanguageException ex)
+        {
+            textHud.HideNow();
+            MessageBox.Show(ex.Message, "拾光", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            textHud.HideNow();
+            MessageBox.Show($"文字辨識失敗：{ex.Message}", "拾光", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            image.Dispose();
+            recognizing = false;
+        }
     }
 
     /// The whole monitor under the pointer, no picker (same as macOS).

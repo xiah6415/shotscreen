@@ -1,7 +1,7 @@
 namespace SuYanShot.Annotations;
 
 /// The editor's tools, in toolbar order, with the same titles and single-key shortcuts as macOS.
-internal enum AnnotationTool { Select, Crop, Arrow, Rectangle, Ellipse, Line, Pen, Highlighter, Text, Counter, Pixelate, Blur }
+internal enum AnnotationTool { Select, Crop, RecognizeText, Arrow, Rectangle, Ellipse, Line, Pen, Highlighter, Text, Counter, Pixelate, Blur }
 
 internal static class AnnotationToolInfo
 {
@@ -9,6 +9,7 @@ internal static class AnnotationToolInfo
     {
         AnnotationTool.Select => "選取",
         AnnotationTool.Crop => "裁切",
+        AnnotationTool.RecognizeText => "辨識文字（OCR）",
         AnnotationTool.Arrow => "箭頭",
         AnnotationTool.Rectangle => "矩形",
         AnnotationTool.Ellipse => "橢圓",
@@ -25,6 +26,7 @@ internal static class AnnotationToolInfo
     {
         AnnotationTool.Select => Keys.V,
         AnnotationTool.Crop => Keys.C,
+        AnnotationTool.RecognizeText => Keys.X,
         AnnotationTool.Arrow => Keys.A,
         AnnotationTool.Rectangle => Keys.R,
         AnnotationTool.Ellipse => Keys.O,

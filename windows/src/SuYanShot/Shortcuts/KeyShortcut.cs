@@ -12,6 +12,8 @@ internal enum ShortcutAction
     Scroll,
     AnnotateClipboard,
     Clipboard,
+    // Added later: keep new actions at the end, so an older shortcuts.json keeps its keys when a new default collides.
+    RecognizeText,
 }
 
 /// A global hotkey such as "Ctrl+Shift+1". Requires Ctrl, Alt or Win unless the key is F1–F24 or PrintScreen (macOS has the same rule for F-keys).

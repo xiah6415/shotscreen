@@ -1,7 +1,9 @@
 using System.Drawing.Drawing2D;
 using SuYanShot.Capture;
 using SuYanShot.Native;
+using SuYanShot.Ocr;
 using SuYanShot.Storage;
+using SuYanShot.UI;
 
 namespace SuYanShot.Annotations;
 
@@ -25,8 +27,10 @@ internal sealed class AnnotationEditor : Form
         state = new AnnotationEditorState(scale);
         canvas = new AnnotationCanvas(state, source) { Dock = DockStyle.Fill };
         toolbar = new AnnotationToolbar(state) { Dock = DockStyle.Top };
-        toolbar.CopyClicked += Copy;
+        toolbar.CopyClicked += CopyImage;
+        toolbar.CopyTextClicked += CopyRecognizedText;
         toolbar.SaveClicked += Save;
+        state.Changed += () => { if (state.Tool == AnnotationTool.RecognizeText) _ = RecognizeTextIfNeeded(); };
 
         Text = "標註";
         AutoScaleMode = AutoScaleMode.None;
@@ -72,6 +76,10 @@ internal sealed class AnnotationEditor : Form
             case Keys.Control | Keys.C:
                 Copy();
                 return true;
+            case Keys.Control | Keys.A when state.Tool == AnnotationTool.RecognizeText && state.RecognizedText != null:
+                state.RecognizedText.SelectAll();
+                state.TextSelectionChanged();
+                return true;
             case Keys.Control | Keys.S:
                 Save();
                 return true;
@@ -90,7 +98,51 @@ internal sealed class AnnotationEditor : Form
         return AnnotationRenderer.Flatten(canvas.Source, canvas.Effects, state.Annotations, state.Crop);
     }
 
+    /// Runs OCR the first time 辨識文字 is chosen (again after a failure).
+    private async Task RecognizeTextIfNeeded()
+    {
+        if (state.TextRecognition is not (AnnotationEditorState.TextRecognitionStatus.Idle or AnnotationEditorState.TextRecognitionStatus.Failed)) return;
+        state.SetTextRecognition(AnnotationEditorState.TextRecognitionStatus.Working);
+        try
+        {
+            var lines = await TextRecognitionService.RecognizeLines(canvas.Source);
+            if (IsDisposed) return;
+            state.SetTextRecognition(AnnotationEditorState.TextRecognitionStatus.Done, new OcrTextSelection(lines));
+            if (lines.Count == 0) toolbar.Flash("沒有找到文字");
+        }
+        catch (TextRecognitionService.NoLanguageException ex)
+        {
+            if (IsDisposed) return;
+            state.SetTextRecognition(AnnotationEditorState.TextRecognitionStatus.Failed);
+            MessageBox.Show(this, ex.Message, "拾光", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            if (IsDisposed) return;
+            state.SetTextRecognition(AnnotationEditorState.TextRecognitionStatus.Failed);
+            toolbar.Flash("文字辨識失敗");
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
+    /// The selected lines, or all of them when none are selected.
+    private void CopyRecognizedText()
+    {
+        if (state.RecognizedText is not { Lines.Count: > 0 } selection) return;
+        if (!ClipboardManager.CopyText(selection.TextToCopy)) { toolbar.Flash("無法複製文字"); return; }
+        CompletionSound.Ocr();
+        var count = selection.Selected.Count == 0 ? selection.Lines.Count : selection.Selected.Count;
+        toolbar.Flash($"已複製 {count} 行文字");
+    }
+
+    /// Ctrl+C copies the recognized text while 辨識文字 is the tool; otherwise the image.
     private void Copy()
+    {
+        if (state.Tool == AnnotationTool.RecognizeText && state.RecognizedText is { Lines.Count: > 0 }) CopyRecognizedText();
+        else CopyImage();
+    }
+
+    private void CopyImage()
     {
         using var image = Rendered();
         ClipboardManager.Copy(image);
@@ -130,6 +182,8 @@ internal sealed class AnnotationToolbar : Control
         public sealed record Redo : Item;
         public sealed record Copy : Item;
         public sealed record Save : Item;
+        /// 辨識文字's 複製全部文字 / 複製 N 行, shown once text was found.
+        public sealed record CopyText : Item;
     }
 
     private readonly AnnotationEditorState state;
@@ -140,6 +194,7 @@ internal sealed class AnnotationToolbar : Control
     private string? feedback;
 
     public event Action? CopyClicked;
+    public event Action? CopyTextClicked;
     public event Action? SaveClicked;
 
     public AnnotationToolbar(AnnotationEditorState state)
@@ -190,7 +245,28 @@ internal sealed class AnnotationToolbar : Control
         items.Add((new Item.Redo(), new RectangleF(x + size + S(2), y, size, size)));
         items.Add((new Item.Save(), new RectangleF(Width - S(12) - size, y, size, size)));
         items.Add((new Item.Copy(), new RectangleF(Width - S(14) - size * 2, y, size, size)));
+        if (CopyTextTitle is string title)
+        {
+            using var font = ButtonFont();
+            var width = TextRenderer.MeasureText(title, font).Width + S(20);
+            items.Add((new Item.CopyText(), new RectangleF(Width - S(26) - size * 2 - width, y, width, size)));
+        }
     }
+
+    private Font ButtonFont() => new("Microsoft JhengHei UI", S(12), FontStyle.Bold, GraphicsUnit.Pixel);
+
+    private string? CopyTextTitle =>
+        state.Tool == AnnotationTool.RecognizeText && state.RecognizedText is { Lines.Count: > 0 } text
+            ? (text.Selected.Count == 0 ? "複製全部文字" : $"複製 {text.Selected.Count} 行")
+            : null;
+
+    /// 辨識中… / failure note while 辨識文字 is the tool.
+    private string? RecognitionNote => state.Tool != AnnotationTool.RecognizeText ? null : state.TextRecognition switch
+    {
+        AnnotationEditorState.TextRecognitionStatus.Working => "辨識中…",
+        AnnotationEditorState.TextRecognitionStatus.Failed => "辨識失敗，再按一次辨識文字重試",
+        _ => null,
+    };
 
     private static string Tooltip(Item item) => item switch
     {
@@ -198,7 +274,8 @@ internal sealed class AnnotationToolbar : Control
         Item.Size size => new[] { "細", "中", "粗" }[size.Level],
         Item.Undo => "復原（Ctrl+Z）",
         Item.Redo => "重做（Ctrl+Shift+Z）",
-        Item.Copy => "複製到剪貼簿（Ctrl+C）",
+        Item.Copy => state.Tool == AnnotationTool.RecognizeText ? "複製圖片" : "複製到剪貼簿（Ctrl+C）",
+        Item.CopyText => "點選或拖曳選取文字（Shift 加選，Ctrl+A 全選），Ctrl+C 複製",
         Item.Save => "存到桌面（Ctrl+S）",
         _ => "",
     };
@@ -248,6 +325,7 @@ internal sealed class AnnotationToolbar : Control
             case Item.Undo: state.Undo(); break;
             case Item.Redo: state.Redo(); break;
             case Item.Copy: CopyClicked?.Invoke(); break;
+            case Item.CopyText: CopyTextClicked?.Invoke(); break;
             case Item.Save: SaveClicked?.Invoke(); break;
         }
     }
@@ -297,15 +375,24 @@ internal sealed class AnnotationToolbar : Control
                 case Item.Save:
                     ToolbarIcons.DrawSave(g, icon, ink, S(1.6f));
                     break;
+                case Item.CopyText:
+                    using (var font = ButtonFont())
+                        TextRenderer.DrawText(g, CopyTextTitle ?? "", font, Rectangle.Round(bounds), Color.FromArgb(100, 170, 255),
+                                              TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    using (var edge = new Pen(Color.FromArgb(120, 100, 170, 255), 1))
+                    using (var outline = AnnotationRenderer.RoundedRect(bounds, S(6)))
+                        g.DrawPath(edge, outline);
+                    break;
             }
         }
-        if (feedback != null)
+        // Feedback (or the OCR status) sits left of the right-hand buttons.
+        var rightmost = items.Where(i => i.Item is Item.Copy or Item.CopyText).Min(i => i.Bounds.X);
+        if ((feedback != null ? "✓ " + feedback : RecognitionNote) is string note)
         {
             using var font = new Font("Microsoft JhengHei UI", S(13), FontStyle.Bold, GraphicsUnit.Pixel);
-            var size = g.MeasureString("✓ " + feedback, font);
-            var copy = items.First(i => i.Item is Item.Copy).Bounds;
-            using var green = new SolidBrush(Color.FromArgb(52, 199, 89));
-            g.DrawString("✓ " + feedback, font, green, copy.X - size.Width - S(12), (Height - size.Height) / 2);
+            var size = g.MeasureString(note, font);
+            using var ink = new SolidBrush(feedback != null ? Color.FromArgb(52, 199, 89) : Color.FromArgb(170, 170, 175));
+            g.DrawString(note, font, ink, rightmost - size.Width - S(12), (Height - size.Height) / 2);
         }
         using var line = new Pen(Color.FromArgb(60, 255, 255, 255), 1);
         g.DrawLine(line, 0, Height - 1, Width, Height - 1);
@@ -341,6 +428,16 @@ internal static class ToolbarIcons
             case AnnotationTool.Crop:
                 g.DrawLines(pen, new[] { new PointF(l + w * 0.25f, t), new PointF(l + w * 0.25f, b - h * 0.25f), new PointF(rt, b - h * 0.25f) });
                 g.DrawLines(pen, new[] { new PointF(l, t + h * 0.25f), new PointF(rt - w * 0.25f, t + h * 0.25f), new PointF(rt - w * 0.25f, b) });
+                break;
+            case AnnotationTool.RecognizeText:
+                // Corner brackets around lines of text.
+                var c = w * 0.28f;
+                g.DrawLines(pen, new[] { new PointF(l, t + c), new PointF(l, t), new PointF(l + c, t) });
+                g.DrawLines(pen, new[] { new PointF(rt - c, t), new PointF(rt, t), new PointF(rt, t + c) });
+                g.DrawLines(pen, new[] { new PointF(rt, b - c), new PointF(rt, b), new PointF(rt - c, b) });
+                g.DrawLines(pen, new[] { new PointF(l + c, b), new PointF(l, b), new PointF(l, b - c) });
+                g.DrawLine(pen, l + w * 0.28f, t + h * 0.38f, rt - w * 0.28f, t + h * 0.38f);
+                g.DrawLine(pen, l + w * 0.28f, t + h * 0.62f, rt - w * 0.42f, t + h * 0.62f);
                 break;
             case AnnotationTool.Arrow:
                 g.DrawLine(pen, l + w * 0.1f, b - h * 0.1f, rt - w * 0.15f, t + h * 0.15f);

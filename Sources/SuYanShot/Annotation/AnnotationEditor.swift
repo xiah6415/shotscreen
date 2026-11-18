@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// One editor window per capture: toolbar on top, canvas below; Copy / Save export the flattened image.
@@ -11,6 +12,8 @@ final class AnnotationEditorController: NSObject, NSWindowDelegate {
     private let canvas: AnnotationCanvasView
     private let capturedAt: Date
     private let exporter: ImageExporter
+    private let textRecognizer = TextRecognitionService()
+    private var toolObservation: AnyCancellable?
     private static let toolbarHeight: CGFloat = 48
 
     init(captured: CapturedImage, exporter: ImageExporter) {
@@ -23,11 +26,15 @@ final class AnnotationEditorController: NSObject, NSWindowDelegate {
         super.init()
 
         canvas.onCopy = { [weak self] in self?.copy() }
+        toolObservation = state.$tool.sink { [weak self] tool in
+            if tool == .recognizeText { DispatchQueue.main.async { self?.recognizeTextIfNeeded() } }
+        }
         canvas.onSave = { [weak self] in self?.save() }
         let hostingView = NSHostingView(rootView: AnnotationEditorView(
             state: state, canvas: canvas,
-            onCopy: { [weak self] in self?.copy() },
-            onSave: { [weak self] in self?.save() }
+            onCopy: { [weak self] in self?.copyImage() },
+            onSave: { [weak self] in self?.save() },
+            onCopyText: { [weak self] in self?.copyRecognizedText() }
         ))
         hostingView.sizingOptions = [] // the window, not SwiftUI, decides the size
 
@@ -58,7 +65,41 @@ final class AnnotationEditorController: NSObject, NSWindowDelegate {
         return AnnotationRenderer.flatten(canvas.source, effects: canvas.effects, annotations: state.annotations, crop: state.crop)
     }
 
+    /// Runs OCR the first time 辨識文字 is chosen.
+    private func recognizeTextIfNeeded() {
+        guard state.textRecognition == .idle || state.textRecognition == .failed else { return }
+        state.textRecognition = .working
+        let image = canvas.source
+        Task { @MainActor [weak self, textRecognizer] in
+            do {
+                let lines = try await textRecognizer.recognizeLines(image)
+                guard let self else { return }
+                self.state.recognizedText = OCRTextSelection(lines: lines)
+                self.state.textRecognition = .done
+                if lines.isEmpty { self.state.flash("沒有找到文字") }
+            } catch {
+                self?.state.textRecognition = .failed
+                self?.state.flash("文字辨識失敗")
+            }
+        }
+    }
+
+    /// The selected lines, or all of them when none are selected.
+    private func copyRecognizedText() {
+        guard let selection = state.recognizedText, !selection.lines.isEmpty else { return }
+        guard ClipboardManager.copy(text: selection.textToCopy) else { state.flash("無法複製文字"); return }
+        CompletionSound.ocr()
+        let count = selection.selected.isEmpty ? selection.lines.count : selection.selected.count
+        state.flash("已複製 \(count) 行文字")
+    }
+
+    /// ⌘C copies the recognized text while 辨識文字 is the tool; otherwise the image.
     private func copy() {
+        if state.tool == .recognizeText, state.recognizedText?.lines.isEmpty == false { copyRecognizedText(); return }
+        copyImage()
+    }
+
+    private func copyImage() {
         guard let image = rendered() else { return }
         ClipboardManager.copy(image)
         state.flash("已複製")
@@ -78,6 +119,7 @@ private struct AnnotationEditorView: View {
     let canvas: AnnotationCanvasView
     let onCopy: () -> Void
     let onSave: () -> Void
+    let onCopyText: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -121,7 +163,8 @@ private struct AnnotationEditorView: View {
                         .foregroundStyle(.green)
                         .transition(.opacity)
                 }
-                ToolbarIcon(symbol: "doc.on.doc", isOn: false, help: "複製到剪貼簿（⌘C）", action: onCopy)
+                if state.tool == .recognizeText { recognizedTextControls }
+                ToolbarIcon(symbol: "doc.on.doc", isOn: false, help: state.tool == .recognizeText ? "複製圖片" : "複製到剪貼簿（⌘C）", action: onCopy)
                 ToolbarIcon(symbol: "square.and.arrow.down", isOn: false, help: "存到桌面（⌘S）", action: onSave)
             }
             .padding(.horizontal, 12)
@@ -130,6 +173,26 @@ private struct AnnotationEditorView: View {
 
             Divider()
             CanvasHost(canvas: canvas)
+        }
+    }
+}
+
+extension AnnotationEditorView {
+    @ViewBuilder var recognizedTextControls: some View {
+        switch state.textRecognition {
+        case .working:
+            ProgressView().controlSize(.small)
+            Text("辨識中…").font(.callout).foregroundStyle(.secondary)
+        case .done where state.recognizedText?.lines.isEmpty == false:
+            let selected = state.recognizedText?.selected.count ?? 0
+            Button(action: onCopyText) {
+                Label(selected == 0 ? "複製全部文字" : "複製 \(selected) 行", systemImage: "text.viewfinder")
+            }
+            .help("點選或拖曳選取文字（⇧ 加選，⌘A 全選），⌘C 複製")
+        case .failed:
+            Text("辨識失敗，再點一次辨識文字重試").font(.callout).foregroundStyle(.secondary)
+        default:
+            EmptyView()
         }
     }
 }

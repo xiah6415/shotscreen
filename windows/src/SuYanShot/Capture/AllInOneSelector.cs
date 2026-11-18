@@ -9,13 +9,14 @@ internal abstract record AllInOneAction
 {
     public sealed record Capture(Rectangle ScreenRect) : AllInOneAction;
     public sealed record Scroll(Rectangle ScreenRect) : AllInOneAction;
+    public sealed record RecognizeText(Rectangle ScreenRect) : AllInOneAction;
     public sealed record Window : AllInOneAction;
     public sealed record FullScreen(Rectangle Monitor) : AllInOneAction;
 }
 
 /// CleanShot-style All-in-One overlay, as on macOS: drag out a region, adjust it (move / 8 handles, dragging past the
 /// opposite edge flips it), then pick an action from the toolbar. Enter or double-click inside captures, Esc / right-click
-/// cancels, S starts a scroll capture of the region. Draws on the frozen desktop like the plain region selector.
+/// cancels, S starts a scroll capture of the region, O recognizes its text (OCR). Draws on the frozen desktop like the plain region selector.
 /// 錄影 joins the toolbar once recording is ported.
 internal sealed class AllInOneSession
 {
@@ -65,7 +66,7 @@ internal sealed class AllInOneOverlay : Form
 
     internal enum Grip { TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left }
 
-    private enum ToolbarButton { Capture, Scroll, Window, FullScreen, Cancel }
+    private enum ToolbarButton { Capture, Scroll, RecognizeText, Window, FullScreen, Cancel }
 
     private abstract record Drag
     {
@@ -78,6 +79,7 @@ internal sealed class AllInOneOverlay : Form
     {
         (ToolbarButton.Capture, "截圖", "截取選取範圍（Enter）"),
         (ToolbarButton.Scroll, "捲動截圖", "開始捲動截圖（S）"),
+        (ToolbarButton.RecognizeText, "OCR", "辨識文字並複製（O）"),
         (ToolbarButton.Window, "視窗", "改選一個視窗"),
         (ToolbarButton.FullScreen, "全螢幕", "截取這個螢幕"),
         (ToolbarButton.Cancel, "取消", "取消（Esc）"),
@@ -167,6 +169,10 @@ internal sealed class AllInOneOverlay : Form
                 if (selection is Rectangle scroll && scroll.Width >= 2 && scroll.Height >= 2)
                     session.Finish(new AllInOneAction.Scroll(new Rectangle(scroll.X + Monitor.X, scroll.Y + Monitor.Y, scroll.Width, scroll.Height)));
                 break;
+            case ToolbarButton.RecognizeText:
+                if (selection is Rectangle ocr && ocr.Width >= 2 && ocr.Height >= 2)
+                    session.Finish(new AllInOneAction.RecognizeText(new Rectangle(ocr.X + Monitor.X, ocr.Y + Monitor.Y, ocr.Width, ocr.Height)));
+                break;
             case ToolbarButton.Window:
                 session.Finish(new AllInOneAction.Window());
                 break;
@@ -216,7 +222,7 @@ internal sealed class AllInOneOverlay : Form
         return null;
     }
 
-    private bool ButtonEnabled(ToolbarButton button) => button is not (ToolbarButton.Capture or ToolbarButton.Scroll) || selection != null;
+    private bool ButtonEnabled(ToolbarButton button) => button is not (ToolbarButton.Capture or ToolbarButton.Scroll or ToolbarButton.RecognizeText) || selection != null;
 
     // MARK: Handles
 
@@ -353,6 +359,9 @@ internal sealed class AllInOneOverlay : Form
             case Keys.S:
                 Perform(ToolbarButton.Scroll);
                 return true;
+            case Keys.O:
+                Perform(ToolbarButton.RecognizeText);
+                return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
@@ -487,6 +496,19 @@ internal sealed class AllInOneOverlay : Form
                 g.DrawLine(pen, r.X + r.Width * 0.5f, r.Y + r.Height * 0.25f, r.X + r.Width * 0.5f, r.Bottom);
                 g.DrawLines(pen, new[] { new PointF(r.X + r.Width * 0.32f, r.Bottom - r.Height * 0.18f), new PointF(r.X + r.Width * 0.5f, r.Bottom),
                                          new PointF(r.X + r.Width * 0.68f, r.Bottom - r.Height * 0.18f) });
+                break;
+            case ToolbarButton.RecognizeText:
+                // Corner brackets around three lines of "text".
+                var c = r.Width * 0.22f;
+                g.DrawLines(pen, new[] { new PointF(r.Left, r.Top + c), new PointF(r.Left, r.Top), new PointF(r.Left + c, r.Top) });
+                g.DrawLines(pen, new[] { new PointF(r.Right - c, r.Top), new PointF(r.Right, r.Top), new PointF(r.Right, r.Top + c) });
+                g.DrawLines(pen, new[] { new PointF(r.Right, r.Bottom - c), new PointF(r.Right, r.Bottom), new PointF(r.Right - c, r.Bottom) });
+                g.DrawLines(pen, new[] { new PointF(r.Left + c, r.Bottom), new PointF(r.Left, r.Bottom), new PointF(r.Left, r.Bottom - c) });
+                for (var line = 0; line < 3; line++)
+                {
+                    var y = r.Top + r.Height * (0.32f + line * 0.18f);
+                    g.DrawLine(pen, r.Left + r.Width * 0.26f, y, r.Right - r.Width * (line == 2 ? 0.45f : 0.26f), y);
+                }
                 break;
             case ToolbarButton.Window:
                 var window = RectangleF.Inflate(r, 0, -r.Height * 0.12f);

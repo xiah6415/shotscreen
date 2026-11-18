@@ -80,7 +80,8 @@ dotnet publish src/SuYanShot -c Release -r win-x64 --self-contained false -p:Pub
 | 全螢幕截圖: the monitor under the pointer | Ctrl+Shift+3 | ⌘⇧3 |
 | 延遲截圖: 3 / 5 / 10 s countdown (click the countdown to cancel), then full screen | Ctrl+Shift+4 (3 s) | ⌘⇧4 |
 | 捲動截圖: select a region, scroll down (or turn on 自動捲動); frames are stitched into one tall image. Pressing the shortcut again finishes | Ctrl+Shift+6 | ⌘⇧6 |
-| 標註剪貼簿裡的圖片: opens the annotation editor on the image on the clipboard — copied image data, or an image file copied in Explorer | Ctrl+Shift+7 | ⌘⇧8 |
+| OCR: select a region; its text is recognized offline with Windows' own engine (`Windows.Media.Ocr`, Traditional Chinese first, then the user's languages) and copied; a pill near the bottom of the screen shows 辨識中… and the result. Also 辨識文字 in All-in-One (O) | Ctrl+Shift+7 | ⌘⇧7 |
+| 標註剪貼簿裡的圖片: opens the annotation editor on the image on the clipboard — copied image data, or an image file copied in Explorer | Ctrl+Shift+8 | ⌘⇧8 |
 
 Every capture is copied to the clipboard (bitmap + PNG) and shown on a preview card in the bottom-right corner:
 hover for 複製 / 標註 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click (or 標註) to open the
@@ -116,16 +117,22 @@ with this test's random generator); the macOS stitcher may want the same change.
 自動捲動 sends mouse-wheel notches to the window under the region (the pointer is moved to its centre), learns how many pixels
 a notch moves in that app from the stitched offsets, aims for ~35% of the region per frame, shrinks the step after a
 rejected frame, tries the other direction once if nothing ever moved, pauses every ~3 region heights to ask 要繼續嗎？, and
-stops with 已經到底了 after 4 frames without movement. No permission is needed; apps running as administrator ignore it.
+pauses with a reason (see the watchdog above) instead of assuming the page ended. No permission is needed; apps running as administrator ignore it.
 
 ### 標註 (annotation editor)
 
-Same tools, keys and behaviour as macOS: 選取 (V), 裁切 (C), 箭頭 (A), 矩形 (R), 橢圓 (O), 直線 (L), 畫筆 (P), 螢光筆 (H),
+Same tools, keys and behaviour as macOS: 選取 (V), 裁切 (C), 辨識文字 (X), 箭頭 (A), 矩形 (R), 橢圓 (O), 直線 (L), 畫筆 (P), 螢光筆 (H),
 文字 (T), 數字標記 (N), 馬賽克 (B), 模糊 (U); 7 colours and 3 sizes (changing them restyles the selected mark); Shift
 constrains shapes to squares/circles and lines to 45°; Delete/Backspace removes the selection; double-click or Enter on a
 text mark edits it. Crop: drag a box, Enter applies, Esc cancels, Backspace restores the full image. Ctrl+Z / Ctrl+Shift+Z
 (or Ctrl+Y) undo and redo (crop included), Ctrl+C copies, Ctrl+S saves to the Desktop with the capture's time, Ctrl+W closes.
 Geometry is stored in image pixels, so the canvas and the exported image use the same renderer.
+辨識文字 runs OCR once on the original capture and outlines every line; click a line (Shift toggles), drag across lines
+(Shift adds), Ctrl+A selects all, Esc clears; Ctrl+C or 複製 N 行 / 複製全部文字 copies the selection (everything when
+nothing is selected), joined in reading order. The rules live in `Ocr/OcrTextSelection.cs`, the same as macOS.
+Windows' engine returns Chinese one character per word; `TextRecognitionService.JoinWords` only puts spaces between
+Latin-script words. OCR needs an installed OCR language (設定 → 時間與語言 → 語言與地區 → 中文 (台灣) → 語言選項 →
+光學字元辨識); without one the app says so.
 
 Differences from macOS, from GDI+: the soft shadow under marks is a translucent offset stroke, the highlighter is a
 translucent stroke rather than a multiply blend, and the text box shows on a plain backdrop while typing.
@@ -270,10 +277,14 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
   scroll capture.
 
 - Written on a Mac without the .NET SDK (2026-11-18), not yet built or run: the scroll watchdog (`ScrollWatchdogTests`),
-  completion sound, 初次設定 window and 顯示所有視窗 grid (smoke tests in `WindowSmokeTests`). Run `dotnet build` and
-  `dotnet test` on Windows before releasing.
+  completion sound, 初次設定 window and 顯示所有視窗 grid (smoke tests in `WindowSmokeTests`), and OCR: shortcut, All-in-One
+  button, the editor's 辨識文字 tool (`OcrTests`: selection rules and word joining; the engine itself is untested). Run
+  `dotnet build` and `dotnet test` on Windows before releasing.
+- Shortcut defaults now match macOS: OCR Ctrl+Shift+7, 標註剪貼簿裡的圖片 Ctrl+Shift+8. A shortcuts.json saved before keeps
+  Ctrl+Shift+7 for annotation (new actions go at the end of `ShortcutAction`, so they lose collisions) and OCR starts
+  unassigned.
 
 ## Not yet ported
 
-Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), OCR, the window picker's
+Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), the window picker's
 dropdown list, and the ⌃⇧ shortcut preset (Windows has no conflicting system screenshot keys to warn about).

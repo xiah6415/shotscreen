@@ -14,6 +14,7 @@ internal sealed class WelcomeWindow : Form
         (ShortcutAction.Window, "視窗截圖"),
         (ShortcutAction.FullScreen, "全螢幕截圖"),
         (ShortcutAction.Scroll, "捲動截圖"),
+        (ShortcutAction.RecognizeText, "OCR（辨識文字並複製）"),
         (ShortcutAction.AnnotateClipboard, "標註剪貼簿裡的圖片"),
         (ShortcutAction.Clipboard, "剪貼簿紀錄"),
     };

@@ -15,6 +15,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private var didCheckpointDrag = false
     private var cropAnchor: CGPoint?
     private var cropDraft: CGRect?
+    /// 辨識文字: where a selection drag started (image pixels) and its current rectangle.
+    private var textAnchor: CGPoint?
+    private var textDrag: CGRect?
     private var textField: NSTextField?
     private var editingTextID: UUID?
     private var observation: AnyCancellable?
@@ -104,6 +107,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         context.restoreGState()
 
         if state.tool == .crop { drawCropOverlay() }
+        if state.tool == .recognizeText { drawRecognizedText() }
 
         if let selected = state.selected, selected.id != editingTextID {
             let outline = NSBezierPath(rect: viewRect(AnnotationRenderer.bounds(of: selected)).insetBy(dx: -4, dy: -4))
@@ -131,10 +135,39 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         OverlayLabel.draw("\(Int(pixels.width)) × \(Int(pixels.height))  \(hint)", near: CGPoint(x: box.minX, y: box.maxY), in: bounds)
     }
 
+    /// Every recognized line gets a soft box; selected ones are filled, like selected text.
+    private func drawRecognizedText() {
+        NSColor.black.withAlphaComponent(0.25).setFill()
+        imageRect.fill(using: .sourceOver)
+        guard let recognized = state.recognizedText else {
+            if state.textRecognition == .working { OverlayLabel.draw("辨識文字中…", near: CGPoint(x: imageRect.minX, y: imageRect.maxY), in: bounds) }
+            return
+        }
+        for (index, line) in recognized.lines.enumerated() {
+            let box = viewRect(line.box).insetBy(dx: -2, dy: -2)
+            let path = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
+            let selected = recognized.selected.contains(index)
+            NSColor.controlAccentColor.withAlphaComponent(selected ? 0.45 : 0.12).setFill()
+            path.fill()
+            NSColor.controlAccentColor.withAlphaComponent(selected ? 0.95 : 0.6).setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+        if let textDrag {
+            let path = NSBezierPath(rect: viewRect(textDrag))
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            NSColor.white.setStroke()
+            path.stroke()
+        }
+        let hint = recognized.lines.isEmpty ? "沒有找到文字"
+            : (recognized.selected.isEmpty ? "點選或拖曳選取文字 · ⌘A 全選 · ⌘C 複製全部" : "已選 \(recognized.selected.count) 行 · ⌘C 複製 · ⇧ 加選")
+        OverlayLabel.draw(hint, near: CGPoint(x: imageRect.minX, y: imageRect.maxY), in: bounds)
+    }
+
     override func resetCursorRects() {
         let cursor: NSCursor = switch state.tool {
         case .select: .arrow
-        case .text: .iBeam
+        case .text, .recognizeText: .iBeam
         default: .crosshair
         }
         addCursorRect(imageRect, cursor: cursor)
@@ -170,6 +203,10 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             } else {
                 beginText(at: point)
             }
+        case .recognizeText:
+            textAnchor = point
+            textDrag = nil
+            state.recognizedText?.beginDrag(adding: event.modifierFlags.contains(.shift))
         case .counter:
             if let counter = state.newAnnotation(at: point) { state.add(counter) }
         default:
@@ -185,6 +222,11 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             if !didCheckpointDrag { state.checkpoint(); didCheckpointDrag = true }
             state.move(id, dx: point.x - anchor.x, dy: point.y - anchor.y)
             dragAnchor = point
+        } else if state.tool == .recognizeText, let anchor = textAnchor {
+            let rect = CGRect(x: min(anchor.x, point.x), y: min(anchor.y, point.y), width: abs(point.x - anchor.x), height: abs(point.y - anchor.y))
+            guard textDrag != nil || max(rect.width, rect.height) * scale >= 3 else { return } // a click, so far
+            textDrag = rect
+            state.recognizedText?.drag(to: rect)
         } else if state.tool == .crop, let anchor = cropAnchor {
             let end = shift ? constrained(from: anchor, to: point, kind: .rectangle) : point
             cropDraft = CGRect(x: min(anchor.x, end.x), y: min(anchor.y, end.y), width: abs(end.x - anchor.x), height: abs(end.y - anchor.y))
@@ -204,6 +246,15 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
 
     override func mouseUp(with event: NSEvent) {
         dragAnchor = nil
+        if state.tool == .recognizeText {
+            if textDrag == nil, let anchor = textAnchor {
+                state.recognizedText?.click(at: anchor, toggle: event.modifierFlags.contains(.shift), tolerance: 4 / scale)
+            }
+            textAnchor = nil
+            textDrag = nil
+            needsDisplay = true
+            return
+        }
         if state.tool == .crop {
             cropAnchor = nil
             if let cropDraft, cropDraft.width * scale < 4 || cropDraft.height * scale < 4 { self.cropDraft = nil }
@@ -257,6 +308,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         case ([.command], "z"): cropDraft = nil; state.undo(); return
         case ([.command, .shift], "z"): cropDraft = nil; state.redo(); return
         case ([.command], "c"): onCopy?(); return
+        case ([.command], "a") where state.tool == .recognizeText: state.recognizedText?.selectAll(); return
         case ([.command], "s"): onSave?(); return
         case ([.command], "w"): window?.performClose(nil); return
         default: break
@@ -280,6 +332,8 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             state.removeSelected()
         case kVK_Return where state.selected.map({ if case .text = $0.kind { true } else { false } }) == true:
             if let selected = state.selected { beginText(at: selected.start, editing: selected) }
+        case kVK_Escape where state.tool == .recognizeText:
+            state.recognizedText?.clear()
         case kVK_Escape:
             if draft != nil { draft = nil; needsDisplay = true } else { state.selectedID = nil }
         default:

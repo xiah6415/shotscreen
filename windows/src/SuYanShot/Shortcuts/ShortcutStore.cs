@@ -7,7 +7,7 @@ namespace SuYanShot.Shortcuts;
 /// An action saved as "" means the user cleared it; a missing action gets its default.
 internal sealed class ShortcutStore
 {
-    /// ⌘⇧1–6 on macOS become Ctrl+Shift+1–6 here.
+    /// ⌘⇧1–8 on macOS become Ctrl+Shift+1–8 here.
     public static readonly IReadOnlyDictionary<ShortcutAction, string> Defaults = new Dictionary<ShortcutAction, string>
     {
         [ShortcutAction.AllInOne] = "Ctrl+Shift+5",
@@ -16,8 +16,10 @@ internal sealed class ShortcutStore
         [ShortcutAction.FullScreen] = "Ctrl+Shift+3",
         [ShortcutAction.Delayed] = "Ctrl+Shift+4",
         [ShortcutAction.Scroll] = "Ctrl+Shift+6",
-        // Windows-only: annotate whatever image is on the clipboard.
-        [ShortcutAction.AnnotateClipboard] = "Ctrl+Shift+7",
+        // The same keys as macOS (⌘⇧7 OCR, ⌘⇧8 標註剪貼簿裡的圖片). Older settings that saved Ctrl+Shift+7 for annotation
+        // keep it; OCR is then unassigned until the user picks a key or 還原預設.
+        [ShortcutAction.RecognizeText] = "Ctrl+Shift+7",
+        [ShortcutAction.AnnotateClipboard] = "Ctrl+Shift+8",
         // macOS uses ⌘⇧V, but Ctrl+Shift+V is "paste as plain text" in browsers and Office, so it stays free here.
         [ShortcutAction.Clipboard] = "Ctrl+Alt+V",
     };

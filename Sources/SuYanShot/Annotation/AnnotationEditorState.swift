@@ -25,6 +25,11 @@ final class AnnotationEditorState: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
 
+    enum TextRecognitionStatus: Equatable { case idle, working, done, failed }
+    /// 辨識文字: recognized once per editor, on the original capture (annotations don't change it).
+    @Published var textRecognition: TextRecognitionStatus = .idle
+    @Published var recognizedText: OCRTextSelection?
+
     /// Image pixels per screen point at capture time, so default sizes look the same on Retina and non-Retina captures.
     let pixelScale: CGFloat
     private struct Snapshot {
@@ -62,7 +67,7 @@ final class AnnotationEditorState: ObservableObject {
         case .pixelate: kind = .pixelate
         case .blur: kind = .blur
         case .counter: kind = .counter(nextCounter)
-        case .select, .crop, .text: return nil
+        case .select, .crop, .recognizeText, .text: return nil
         }
         let points = (kind == .pen || kind == .highlighter || tool == .counter) ? [point] : [point, point]
         return Annotation(kind: kind, points: points, color: color, lineWidth: lineWidth, fontSize: fontSize)
