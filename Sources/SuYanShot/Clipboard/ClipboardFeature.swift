@@ -18,10 +18,17 @@ final class ClipboardFeature {
     init() {
         monitor.onCapture = { [weak self] snapshot in self?.store.add(snapshot) }
         panel.onPaste = { [weak self] item, plainText in self?.paste(item, plainText: plainText) }
+        panel.onAnnotate = { [weak self] item in
+            guard let self, let data = self.store.payload(item.id, ext: "png"), let image = ClipboardImage.decode(data) else { return }
+            self.onAnnotate?(image)
+        }
         enabledObservation = store.$isEnabled.sink { [weak self] enabled in
             if enabled { self?.monitor.start() } else { self?.monitor.stop() }
         }
     }
+
+    /// Opens the annotation editor on an image (set by the app).
+    var onAnnotate: ((CGImage) -> Void)?
 
     func togglePanel() { panel.toggle() }
 
