@@ -9,7 +9,7 @@ internal enum SelectionMode
     /// Drag a rectangle (Esc or right-click cancels).
     Region,
 
-    /// Hover highlights the front-most window under the pointer; click picks it.
+    /// Hover highlights the front-most window under the pointer; click picks it. Space shows every window as a grid.
     Window,
 }
 
@@ -38,6 +38,7 @@ internal sealed class SelectionSession
     private Point? anchor;
     private Rectangle dragMonitor;
     private WindowInfo? hovered;
+    private WindowGrid? grid;
 
     private SelectionSession(FrozenDesktop desktop, SelectionMode mode, IReadOnlyList<WindowInfo> windows)
     {
@@ -110,6 +111,24 @@ internal sealed class SelectionSession
 
     public void Cancel() => Finish(null);
 
+    /// 顯示所有視窗: hides the overlays behind a grid of every window; Esc there comes back here.
+    public void ShowGrid()
+    {
+        if (Mode != SelectionMode.Window || grid != null || completion.Task.IsCompleted) return;
+        var monitor = (forms.FirstOrDefault(f => f.Monitor.Contains(Cursor.Position)) ?? forms[0]).Monitor;
+        grid = new WindowGrid(windows, desktop, monitor,
+            onPick: window => { grid = null; Finish(new SelectionResult.Window(window)); },
+            onBack: () =>
+            {
+                grid = null;
+                var active = forms.FirstOrDefault(f => f.Monitor.Contains(Cursor.Position)) ?? forms.FirstOrDefault();
+                if (active == null) return;
+                active.Activate();
+                NativeMethods.SetForegroundWindow(active.Handle);
+            });
+        grid.Show();
+    }
+
     private void UpdateHover(Point screenPoint)
     {
         if (Mode != SelectionMode.Window) return;
@@ -120,6 +139,8 @@ internal sealed class SelectionSession
     private void Finish(SelectionResult? result)
     {
         if (completion.Task.IsCompleted) return;
+        grid?.Close();
+        grid = null;
         foreach (var form in forms) form.Close();
         forms.Clear();
         completion.SetResult(result);
@@ -206,6 +227,7 @@ internal sealed class OverlayForm : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         if (e.KeyCode == Keys.Escape) session.Cancel();
+        else if (e.KeyCode == Keys.Space) session.ShowGrid();
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -238,6 +260,24 @@ internal sealed class OverlayForm : Form
 
         if (session.Mode == SelectionMode.Region && !session.Dragging && Monitor.Contains(session.Pointer))
             DrawCrosshair(g, new Point(session.Pointer.X - Monitor.X, session.Pointer.Y - Monitor.Y));
+        if (session.Mode == SelectionMode.Window && Monitor.Contains(session.Pointer))
+            DrawHint(g, "按一下選視窗　空白鍵：顯示所有視窗　Esc 取消");
+    }
+
+    private void DrawHint(Graphics g, string text)
+    {
+        using var font = new Font("Microsoft JhengHei UI", Px(13f), FontStyle.Regular, GraphicsUnit.Pixel);
+        var size = g.MeasureString(text, font);
+        var padding = Px(10f);
+        var box = new RectangleF((ClientSize.Width - size.Width) / 2 - padding, ClientSize.Height - size.Height - padding * 2 - Px(32f),
+                                 size.Width + padding * 2, size.Height + padding);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var background = new SolidBrush(Color.FromArgb(210, 20, 20, 20));
+        using var path = RoundedRect(box, box.Height / 2);
+        g.FillPath(background, path);
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        g.DrawString(text, font, Brushes.White, box.X + padding, box.Y + padding / 2);
+        g.SmoothingMode = SmoothingMode.None;
     }
 
     private void DrawCrosshair(Graphics g, Point p)

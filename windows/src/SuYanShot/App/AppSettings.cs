@@ -9,6 +9,9 @@ namespace SuYanShot.App;
 /// app kept its bundle id.
 internal sealed class AppSettings
 {
+    /// 初次設定 was finished or closed; it then opens only from the tray menu.
+    public bool OnboardingCompleted { get; set; }
+
     public bool ClipboardEnabled { get; set; } = true;
     public int ClipboardLimit { get; set; } = 200;
 

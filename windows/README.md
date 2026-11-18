@@ -76,11 +76,11 @@ dotnet publish src/SuYanShot -c Release -r win-x64 --self-contained false -p:Pub
 | --- | --- | --- |
 | All-in-One: drag a region, adjust it (move, 8 handles, flips past the opposite edge), then 截圖 (Enter / double-click), 捲動截圖 (S), 視窗 or 全螢幕 from the toolbar; Esc / right-click cancels | Ctrl+Shift+5 | ⌘⇧5 |
 | 框選截圖: drag a region on a frozen copy of the screen; Esc / right-click cancels; size label and crosshair guides | Ctrl+Shift+1 | ⌘⇧1 |
-| 視窗截圖: hover highlights the front-most window, click captures it (even where other windows cover it) | Ctrl+Shift+2 | ⌘⇧2 |
+| 視窗截圖: hover highlights the front-most window, click captures it (even where other windows cover it); Space opens 顯示所有視窗, a full-screen grid of thumbnails of every window with search (Enter picks the first match, Esc goes back) | Ctrl+Shift+2 | ⌘⇧2 |
 | 全螢幕截圖: the monitor under the pointer | Ctrl+Shift+3 | ⌘⇧3 |
 | 延遲截圖: 3 / 5 / 10 s countdown (click the countdown to cancel), then full screen | Ctrl+Shift+4 (3 s) | ⌘⇧4 |
 | 捲動截圖: select a region, scroll down (or turn on 自動捲動); frames are stitched into one tall image. Pressing the shortcut again finishes | Ctrl+Shift+6 | ⌘⇧6 |
-| 標註剪貼簿裡的圖片 (Windows only): opens the annotation editor on the image on the clipboard — copied image data, or an image file copied in Explorer | Ctrl+Shift+7 | — |
+| 標註剪貼簿裡的圖片: opens the annotation editor on the image on the clipboard — copied image data, or an image file copied in Explorer | Ctrl+Shift+7 | ⌘⇧8 |
 
 Every capture is copied to the clipboard (bitmap + PNG) and shown on a preview card in the bottom-right corner:
 hover for 複製 / 標註 / 儲存 / 關閉, drag it into another app to drop a `.png`, double-click (or 標註) to open the
@@ -88,7 +88,12 @@ annotation editor.
 The card closes after 8 s unless hovered. Saved files go to the Desktop as `Screenshot 2026-10-21 at 14.03.07.png`, the same
 naming as macOS.
 
-Tray menu also has 剪貼簿紀錄, 手機分享 (switch), 手機分享設定…, 打開截圖資料夾 and 設定….
+A successful capture plays a short sound (Windows' own `Windows Navigation Start.wav`, or the Asterisk sound if it is missing),
+like the "Pop" on macOS.
+
+Tray menu also has 剪貼簿紀錄, 手機分享 (switch), 手機分享設定…, 打開截圖資料夾, 設定… and 初次設定…. 初次設定 opens on first
+launch (until it is closed once, `onboardingCompleted` in settings.json): the shortcuts, with any Windows refused in red and a
+button to 設定…, the clipboard history switch and 登入時啟動. Windows needs no capture permission, so there is no permission step.
 
 ### 捲動截圖 (scroll capture)
 
@@ -98,6 +103,10 @@ frames. The region is captured every 100 ms (200 ms while auto scrolling) and `C
 macOS stitcher with the same thresholds — matches each frame against the last one: 96-column grayscale row signatures
 (rightmost 4% ignored for overlay scrollbars), sticky top/bottom bars detected and shown once, a coarse 1/4-height search
 refined at full resolution, unmatched frames skipped rather than guessed, scrolling down only, 40,000 px cap.
+Auto scroll pauses instead of guessing that the page ended (`Capture/ScrollProgressWatchdog.cs`, the 0.4.2 macOS watchdog):
+4 unchanged frames → 畫面未移動 (after trying the other wheel direction once if nothing was stitched yet), 8 rejected frames →
+連續拼接失敗, 10 s without new rows → 一段時間沒有新內容, 3 capture failures in a row → 畫面擷取失敗 (capturing stops until
+重試). The HUD shows the reason and a ↻ 重試 button; 完成 keeps what was stitched.
 
 One Windows-only addition (`Disambiguate`): when the compared overlap is entirely blank, blank rows just above the footer
 are compared too before picking an offset, so a long empty stretch can only lose or repeat blank rows, never content.
@@ -260,7 +269,11 @@ WinForms on .NET 8, no NuGet packages in the app. The structure mirrors `Sources
 - Not yet tried by the user: the rename, `glean.local` with password login from a real phone, All-in-One, annotation editor,
   scroll capture.
 
+- Written on a Mac without the .NET SDK (2026-11-18), not yet built or run: the scroll watchdog (`ScrollWatchdogTests`),
+  completion sound, 初次設定 window and 顯示所有視窗 grid (smoke tests in `WindowSmokeTests`). Run `dotnet build` and
+  `dotnet test` on Windows before releasing.
+
 ## Not yet ported
 
-Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), the window picker's
-thumbnail grid, and the first-run 初次設定 window.
+Screen recording / GIF (and its 錄影 button in All-in-One and section in the settings window), OCR, the window picker's
+dropdown list, and the ⌃⇧ shortcut preset (Windows has no conflicting system screenshot keys to warn about).

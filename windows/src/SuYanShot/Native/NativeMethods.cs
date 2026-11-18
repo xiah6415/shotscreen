@@ -73,6 +73,22 @@ internal static partial class NativeMethods
     public static partial int GetWindowTextLengthW(IntPtr hWnd);
 
     [LibraryImport("user32.dll")]
+    private static unsafe partial int GetWindowTextW(IntPtr hWnd, char* text, int maxCount);
+
+    /// The window's title bar text ("" when it has none).
+    public static unsafe string WindowTitle(IntPtr hWnd)
+    {
+        var length = GetWindowTextLengthW(hWnd);
+        if (length <= 0) return "";
+        var buffer = new char[length + 1];
+        fixed (char* text = buffer)
+        {
+            var copied = GetWindowTextW(hWnd, text, buffer.Length);
+            return new string(buffer, 0, Math.Clamp(copied, 0, length));
+        }
+    }
+
+    [LibraryImport("user32.dll")]
     public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [LibraryImport("user32.dll")]

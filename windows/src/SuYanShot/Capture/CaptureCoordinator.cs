@@ -149,6 +149,7 @@ internal sealed class CaptureCoordinator
     private void Deliver(Bitmap image)
     {
         ClipboardManager.Copy(image);
+        CompletionSound.Screenshot();
         new FloatingThumbnail(image, exporter, ScreenCapture.ScreenUnderCursor(), OpenEditor).Show();
     }
 

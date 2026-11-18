@@ -8,11 +8,12 @@ internal enum AutoScrollStatus
     Running,
     /// Stopped after a stretch of auto scrolling; waiting for the user to continue or finish.
     Checkpoint,
-    /// Nothing moves any more.
-    ReachedEnd,
+    /// Auto scrolling stopped (see <see cref="ScrollCaptureProgress.Pause"/>); the user can retry, scroll by hand, or finish.
+    Paused,
 }
 
-internal sealed record ScrollCaptureProgress(int Height, FrameResult LastResult, Bitmap? Preview, AutoScrollStatus Auto);
+internal sealed record ScrollCaptureProgress(int Height, FrameResult LastResult, Bitmap? Preview, AutoScrollStatus Auto,
+                                             ScrollPauseReason? Pause = null);
 
 /// Scroll capture, as on macOS: repeatedly captures a fixed screen region and stitches what scrolled into view.
 /// The user scrolls by hand, or turns on auto scroll, which pauses at checkpoints to ask before going further.
@@ -27,7 +28,6 @@ internal sealed class ScrollCaptureSession
         /// Wanted movement per frame, in pixels.
         public int StepPixels;
         public int SinceCheckpoint;
-        public int StalledFrames;
         /// Wheel notches move a different number of pixels in every app; learned from what the stitcher reports.
         public double PixelsPerNotch = 100;
         public int LastNotches;
@@ -42,6 +42,10 @@ internal sealed class ScrollCaptureSession
     private Task? loop;
     private AutoScrollState? auto;
     private AutoScrollStatus autoStatus = AutoScrollStatus.Off;
+    private ScrollPauseReason? pauseReason;
+    private readonly ScrollProgressWatchdog watchdog = new();
+    /// After repeated capture failures, stop trying until the user presses 重試.
+    private volatile bool captureSuspended;
 
     /// <param name="region">Screen pixels.</param>
     /// <param name="onProgress">Called on the UI thread after every frame.</param>
@@ -60,15 +64,28 @@ internal sealed class ScrollCaptureSession
     {
         while (!token.IsCancellationRequested)
         {
+            if (captureSuspended)
+            {
+                await Delay(Interval, token);
+                continue;
+            }
             var began = DateTime.UtcNow;
             Bitmap frame;
             try
             {
                 frame = ScreenCapture.CaptureRect(region);
             }
-            catch (System.ComponentModel.Win32Exception)
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or ExternalException or ArgumentException)
             {
-                // The desktop can be briefly unavailable (secure desktop, lock screen); try again next tick.
+                // The desktop can be briefly unavailable (secure desktop, lock screen); try again next tick,
+                // but after a few failures in a row pause and tell the user instead of spinning silently.
+                if (token.IsCancellationRequested) break;
+                if (watchdog.CaptureFailed() is ScrollPauseReason reason)
+                {
+                    Pause(reason);
+                    captureSuspended = true;
+                    onProgress(new ScrollCaptureProgress(stitcher.Height, new FrameResult.Rejected(), null, autoStatus, pauseReason));
+                }
                 await Delay(Interval, token);
                 continue;
             }
@@ -80,9 +97,10 @@ internal sealed class ScrollCaptureSession
                 return (r, r is FrameResult.First or FrameResult.Appended ? stitcher.MakePreview() : null);
             });
             if (token.IsCancellationRequested) { preview?.Dispose(); break; }
+            watchdog.CaptureSucceeded();
             if (result is FrameResult.LimitReached) StopAuto(AutoScrollStatus.Off);
             AdvanceAutoScroll(result);
-            onProgress(new ScrollCaptureProgress(stitcher.Height, result, preview, autoStatus));
+            onProgress(new ScrollCaptureProgress(stitcher.Height, result, preview, autoStatus, pauseReason));
             if (result is FrameResult.LimitReached) break;
             var remaining = (autoStatus == AutoScrollStatus.Running ? AutoInterval : Interval) - (DateTime.UtcNow - began);
             if (remaining > TimeSpan.Zero) await Delay(remaining, token);
@@ -95,9 +113,11 @@ internal sealed class ScrollCaptureSession
         catch (OperationCanceledException) { }
     }
 
-    /// Turns auto scroll on or off (also resumes after a checkpoint).
+    /// Turns auto scroll on or off (also resumes after a checkpoint or a pause; off after a capture failure retries capturing).
     public void SetAutoScroll(bool enabled)
     {
+        captureSuspended = false;
+        watchdog.Reset();
         if (!enabled)
         {
             StopAuto(AutoScrollStatus.Off);
@@ -105,8 +125,8 @@ internal sealed class ScrollCaptureSession
         }
         auto ??= new AutoScrollState { StepPixels = Math.Max(60, (int)(region.Height * 0.35)) };
         auto.SinceCheckpoint = 0;
-        auto.StalledFrames = 0;
         autoStatus = AutoScrollStatus.Running;
+        pauseReason = null;
         // Wheel input goes to the window under the pointer, so park it over the captured region.
         SetCursorPos(region.X + region.Width / 2, region.Y + region.Height / 2);
     }
@@ -115,35 +135,42 @@ internal sealed class ScrollCaptureSession
     private void AdvanceAutoScroll(FrameResult result)
     {
         if (autoStatus != AutoScrollStatus.Running || auto is not AutoScrollState state) return;
+        ScrollProgressWatchdog.Frame frame;
         switch (result)
         {
             case FrameResult.Appended appended:
                 state.SinceCheckpoint += appended.Rows;
-                state.StalledFrames = 0;
                 if (state.LastNotches > 0)
                     state.PixelsPerNotch = state.PixelsPerNotch * 0.5 + appended.Rows / (double)state.LastNotches * 0.5;
+                frame = ScrollProgressWatchdog.Frame.Appended;
                 break;
             case FrameResult.Unchanged:
-                state.StalledFrames++;
+                frame = ScrollProgressWatchdog.Frame.Unchanged;
                 break;
             case FrameResult.Rejected:
                 // Scrolled further than the stitcher can follow; take smaller steps.
                 state.StepPixels = Math.Max(30, state.StepPixels * 2 / 3);
+                frame = ScrollProgressWatchdog.Frame.Rejected;
                 break;
+            case FrameResult.First:
+                frame = ScrollProgressWatchdog.Frame.First;
+                break;
+            default:
+                return;
         }
 
-        if (state.StalledFrames >= 4)
+        if (watchdog.Observe(frame) is ScrollPauseReason reason)
         {
-            // Nothing moved. If nothing was ever stitched, the wheel direction may be inverted; try the other way once.
-            if (!state.TriedOtherDirection && stitcher.Height == region.Height)
+            // Nothing moved and nothing was ever stitched: the wheel direction may be inverted; try the other way once.
+            if (reason == ScrollPauseReason.NoMovement && !state.TriedOtherDirection && stitcher.Height == region.Height)
             {
                 state.TriedOtherDirection = true;
                 state.Direction = -state.Direction;
-                state.StalledFrames = 0;
+                watchdog.Reset();
             }
             else
             {
-                StopAuto(AutoScrollStatus.ReachedEnd);
+                Pause(reason);
                 return;
             }
         }
@@ -163,7 +190,14 @@ internal sealed class ScrollCaptureSession
     private void StopAuto(AutoScrollStatus status)
     {
         autoStatus = status;
+        pauseReason = null;
         if (status == AutoScrollStatus.Off) auto = null;
+    }
+
+    private void Pause(ScrollPauseReason reason)
+    {
+        autoStatus = AutoScrollStatus.Paused;
+        pauseReason = reason;
     }
 
     /// Stops capturing and returns the stitched image (null if nothing was captured).

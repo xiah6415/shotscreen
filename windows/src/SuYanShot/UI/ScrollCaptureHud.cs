@@ -52,18 +52,23 @@ internal sealed class ScrollCaptureHud : IDisposable
         if (progress.Preview != null) preview.SetImage(progress.Preview);
         controls.StitchedHeight = progress.Height;
         controls.Auto = progress.Auto;
-        controls.Message = (progress.Auto, progress.LastResult) switch
-        {
-            (_, FrameResult.LimitReached) => "已達長度上限，請按完成",
-            (AutoScrollStatus.Checkpoint, _) => "已自動往下捲了一段，要繼續嗎？",
-            (AutoScrollStatus.ReachedEnd, _) => "已經到底了，按完成產生長圖",
-            (AutoScrollStatus.Running, _) => null,
-            (AutoScrollStatus.Off, FrameResult.Rejected) => "沒對上，請慢一點往下捲",
-            (AutoScrollStatus.Off, FrameResult.Appended) => null,
-            _ => controls.Message,
-        };
+        controls.Pause = progress.Pause;
+        controls.Message = Message(progress);
         controls.Invalidate();
     }
+
+    internal static string? Message(ScrollCaptureProgress progress) =>
+        (progress.Auto, progress.LastResult, progress.Pause) switch
+        {
+            (_, FrameResult.LimitReached, _) => "已達長度上限，請按完成",
+            (AutoScrollStatus.Checkpoint, _, _) => "已自動往下捲了一段，要繼續嗎？",
+            (AutoScrollStatus.Paused, _, ScrollPauseReason.NoMovement) => "畫面未移動，可能到底或選錯範圍",
+            (AutoScrollStatus.Paused, _, ScrollPauseReason.CannotStitch) => "連續拼接失敗，已暫停自動捲動",
+            (AutoScrollStatus.Paused, _, ScrollPauseReason.NoProgress) => "一段時間沒有新內容，已暫停",
+            (AutoScrollStatus.Paused, _, ScrollPauseReason.CaptureFailed) => "畫面擷取失敗，請按重試",
+            (AutoScrollStatus.Off, FrameResult.Rejected, _) => "沒對上，請慢一點往下捲",
+            _ => null,
+        };
 
     public void Dispose()
     {
@@ -196,6 +201,7 @@ internal sealed class ScrollCaptureHud : IDisposable
 
         public int StitchedHeight { get; set; }
         public AutoScrollStatus Auto { get; set; }
+        public ScrollPauseReason? Pause { get; set; }
         public string? Message { get; set; }
 
         public ControlBar(Rectangle bounds, Action onDone, Action onCancel, Action<bool> onAutoScroll) : base(bounds, clickThrough: false)
@@ -218,9 +224,9 @@ internal sealed class ScrollCaptureHud : IDisposable
             AutoScrollStatus.Off => "▶ 自動捲動",
             AutoScrollStatus.Running => "⏸ 暫停",
             AutoScrollStatus.Checkpoint => "↓ 繼續往下",
+            AutoScrollStatus.Paused => "↻ 重試",
             _ => null,
         };
-
         private RectangleF ButtonRect(Button button)
         {
             var h = S(30);
@@ -264,7 +270,15 @@ internal sealed class ScrollCaptureHud : IDisposable
             {
                 case Button.Done: onDone(); break;
                 case Button.Cancel: onCancel(); break;
-                case Button.Auto: onAutoScroll(Auto != AutoScrollStatus.Running); break;
+                // 重試 after a capture failure only resumes capturing; otherwise it restarts auto scroll.
+                case Button.Auto:
+                    onAutoScroll(Auto switch
+                    {
+                        AutoScrollStatus.Running => false,
+                        AutoScrollStatus.Paused => Pause != ScrollPauseReason.CaptureFailed,
+                        _ => true,
+                    });
+                    break;
             }
         }
 
@@ -295,7 +309,7 @@ internal sealed class ScrollCaptureHud : IDisposable
                 g.DrawString(title, small, ink, rect, new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center });
             }
             if (AutoTitle is string auto)
-                DrawButton(Button.Auto, auto, Auto == AutoScrollStatus.Checkpoint ? orange : Color.FromArgb(64, 64, 68), Color.White);
+                DrawButton(Button.Auto, auto, Auto is AutoScrollStatus.Checkpoint or AutoScrollStatus.Paused ? orange : Color.FromArgb(64, 64, 68), Color.White);
             DrawButton(Button.Cancel, "取消", Color.FromArgb(64, 64, 68), Color.White);
             DrawButton(Button.Done, "完成", accent, Color.White);
         }

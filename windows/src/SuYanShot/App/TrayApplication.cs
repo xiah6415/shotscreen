@@ -21,6 +21,9 @@ internal sealed class TrayApplication : ApplicationContext
     private readonly UpdateController updates;
     private readonly ToolStripMenuItem phoneSwitch;
     private SettingsWindow? settingsWindow;
+    private WelcomeWindow? welcomeWindow;
+    private readonly AppSettings settings;
+    private IReadOnlySet<ShortcutAction> refusedShortcuts = new HashSet<ShortcutAction>();
     private bool trayShowsSharing;
 
     public TrayApplication()
@@ -58,11 +61,12 @@ internal sealed class TrayApplication : ApplicationContext
         menu.Items.Add(Item("打開截圖資料夾", () => Process.Start(new ProcessStartInfo(exporter.DefaultDirectory) { UseShellExecute = true })));
         menu.Items.Add(Item("設定…", OpenSettings));
         menu.Items.Add(Item("檢查更新…", () => updates!.CheckNow()));
+        menu.Items.Add(Item("初次設定…", OpenWelcome));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Item("結束拾光", ExitThread));
 
         // Created after the menu, so a WinForms synchronization context exists for the clipboard and phone server.
-        var settings = AppSettings.Load();
+        settings = AppSettings.Load();
         clipboard = new ClipboardFeature(settings) { Annotate = coordinator.Annotate };
         updates = new UpdateController(settings) { CanInstallNow = () => !coordinator.IsCapturing, Exit = ExitThread };
 
@@ -87,8 +91,23 @@ internal sealed class TrayApplication : ApplicationContext
         updates.Start();
 
         var failed = ApplyShortcuts(shortcutStore.Load());
-        if (failed.Count > 0)
+        if (!settings.OnboardingCompleted) OpenWelcome(); // it lists any refused shortcut itself
+        else if (failed.Count > 0)
             trayIcon.ShowBalloonTip(5000, "拾光", "有快捷鍵已被其他程式使用，可以在「設定…」換一組。", ToolTipIcon.Warning);
+    }
+
+    private void OpenWelcome()
+    {
+        if (welcomeWindow is { IsDisposed: false })
+        {
+            welcomeWindow.Activate();
+            return;
+        }
+        welcomeWindow = new WelcomeWindow(settings, shortcutStore.Load(), refusedShortcuts,
+            clipboard.IsEnabled, enabled => clipboard.IsEnabled = enabled, OpenSettings);
+        welcomeWindow.FormClosed += (_, _) => welcomeWindow = null;
+        welcomeWindow.Show();
+        welcomeWindow.Activate();
     }
 
     private static ToolStripMenuItem Item(string title, Action action) => new(title, null, (_, _) => action());
@@ -125,6 +144,7 @@ internal sealed class TrayApplication : ApplicationContext
     private IReadOnlySet<ShortcutAction> ApplyShortcuts(IReadOnlyDictionary<ShortcutAction, KeyShortcut> shortcuts)
     {
         var failed = hotkeys.Apply(shortcuts).Select(f => f.Action).ToHashSet();
+        refusedShortcuts = failed;
         foreach (var (action, item) in actionItems)
             item.ShortcutKeyDisplayString = shortcuts.TryGetValue(action, out var shortcut) ? shortcut.ToString() : null;
         return failed;
@@ -168,6 +188,7 @@ internal sealed class TrayApplication : ApplicationContext
     protected override void ExitThreadCore()
     {
         settingsWindow?.Close();
+        welcomeWindow?.Close();
         clipboard.Dispose();
         updates.Dispose();
         hotkeys.Dispose();

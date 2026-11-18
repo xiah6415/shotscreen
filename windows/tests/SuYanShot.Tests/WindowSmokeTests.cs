@@ -2,6 +2,7 @@ using SuYanShot.Annotations;
 using SuYanShot.App;
 using SuYanShot.Capture;
 using SuYanShot.ClipboardHistory;
+using SuYanShot.Shortcuts;
 using SuYanShot.Storage;
 using SuYanShot.UI;
 using Xunit;
@@ -57,6 +58,38 @@ public sealed class WindowSmokeTests : IDisposable
         Build(new AnnotationEditor(new Bitmap(800, 500), DateTime.Now, exporter));
         using var hud = new ScrollCaptureHud(new Rectangle(200, 200, 600, 400), () => { }, () => { }, _ => { });
         hud.Update(new ScrollCaptureProgress(400, new FrameResult.First(), new Bitmap(200, 133), AutoScrollStatus.Off));
+        hud.Update(new ScrollCaptureProgress(400, new FrameResult.Unchanged(), null, AutoScrollStatus.Paused, ScrollPauseReason.NoMovement));
+    });
+
+    [Fact]
+    public void WelcomeWindowSavesCompletion() => OnStaThread(() =>
+    {
+        var settings = new AppSettings { FilePath = Path.Combine(folder, "settings.json") };
+        var shortcuts = new ShortcutStore(Path.Combine(folder, "shortcuts.json")).Load();
+        var form = new WelcomeWindow(settings, shortcuts, new HashSet<ShortcutAction> { ShortcutAction.Region }, true, _ => { }, () => { });
+        form.Show();
+        form.Close();
+        Assert.True(AppSettings.Load(settings.FilePath).OnboardingCompleted);
+    });
+
+    [Fact]
+    public void WindowGridShowsThumbnailsAndSearches() => OnStaThread(() =>
+    {
+        using var target = new Form { Text = "拾光測試視窗", Bounds = new Rectangle(100, 100, 480, 320), BackColor = Color.Orange };
+        target.Show();
+        Application.DoEvents();
+        var info = new WindowInfo(target.Handle, target.Bounds);
+        Assert.Equal("拾光測試視窗", WindowGrid.Describe(info).Title);
+        Assert.True(WindowGrid.Describe(info).Matches("測試"));
+        Assert.False(WindowGrid.Describe(info).Matches("找不到"));
+
+        using var desktop = new FrozenDesktop(new Bitmap(800, 600), new Rectangle(0, 0, 800, 600));
+        WindowInfo? picked = null;
+        var grid = new WindowGrid(new[] { info }, desktop, Screen.PrimaryScreen!.Bounds, w => picked = w, () => { });
+        Build(grid);
+        using var shrunk = WindowGrid.Shrink(new Bitmap(1200, 300), new Size(300, 200));
+        Assert.Equal(new Size(300, 75), shrunk.Size);
+        Assert.Null(picked);
     });
 
     [Fact]
