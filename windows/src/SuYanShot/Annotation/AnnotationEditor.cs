@@ -268,7 +268,7 @@ internal sealed class AnnotationToolbar : Control
         _ => null,
     };
 
-    private static string Tooltip(Item item) => item switch
+    private string Tooltip(Item item) => item switch
     {
         Item.Tool tool => $"{tool.Value.Title()}（{tool.Value.Key()}）",
         Item.Size size => new[] { "細", "中", "粗" }[size.Level],

@@ -88,9 +88,9 @@ internal sealed class CaptureCoordinator
     }
 
     /// All-in-One hands over the cropped region; recognition runs after the overlay has closed.
-    private Bitmap? RecognizeTextLater(Bitmap image, Rectangle rect)
+    private Bitmap? RecognizeTextLater(Bitmap? image, Rectangle rect)
     {
-        _ = RecognizeAndCopy(image, rect);
+        if (image != null) _ = RecognizeAndCopy(image, rect);
         return null;
     }
 
